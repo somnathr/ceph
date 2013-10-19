@@ -63,6 +63,10 @@ class LogicError(Error):
     """ `` class, derived from `Error` """
     pass
 
+class TimedOut(Error):
+    """ `TimedOut` class, derived from `Error` """
+    pass
+
 def make_ex(ret, msg):
     """
     Translate a librados return code into an exception.
@@ -80,7 +84,8 @@ def make_ex(ret, msg):
         errno.EIO       : IOError,
         errno.ENOSPC    : NoSpace,
         errno.EEXIST    : ObjectExists,
-        errno.ENODATA   : NoData
+        errno.ENODATA   : NoData,
+        errno.ETIMEDOUT : TimedOut
         }
     ret = abs(ret)
     if ret in errors:
