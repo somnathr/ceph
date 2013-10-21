@@ -486,7 +486,10 @@ protected:
       uint64_t count;              /// number of readers or writers
       list<OpRequestRef> waiters;  /// ops waiting on state change
 
-      ObjState() : state(NONE), count(0) {}
+      /// if set, restart backfill when we can get a read lock
+      bool backfill_waiting_on_read;
+
+      ObjState() : state(NONE), count(0), backfill_waiting_on_read(false) {}
       bool get_read(OpRequestRef op) {
 	if (get_read_lock()) {
 	  return true;
@@ -525,7 +528,8 @@ protected:
       }
       bool get_write_lock() {
 	// don't starve anybody!
-	if (!waiters.empty()) {
+	if (!waiters.empty() ||
+	    backfill_waiting_on_read) {
 	  return false;
 	}
 	switch (state) {
@@ -563,8 +567,11 @@ protected:
       }
       bool empty() const { return state == NONE; }
     };
-    map<hobject_t, ObjState > obj_state;
+    map<hobject_t, ObjState > obj_state; ///< map of rw_lock states
+    ReplicatedPG *pg;		         ///< the PG we serve
   public:
+    RWTracker(ReplicatedPG *pg_) : pg(pg_) {}
+
     bool get_read(const hobject_t &hoid, OpRequestRef op) {
       return obj_state[hoid].get_read(op);
     }
@@ -580,8 +587,28 @@ protected:
     void put_write(const hobject_t &hoid, list<OpRequestRef> *to_wake) {
       obj_state[hoid].put_write(to_wake);
       if (obj_state[hoid].empty()) {
+	if (obj_state[hoid].backfill_waiting_on_read) {
+	  pg->osd->recovery_wq.queue(pg); // is this good enough?
+	}
 	obj_state.erase(hoid);
       }
+    }
+    bool get_backfill_read(const hobject_t &hoid) {
+      ObjState& obj_locker = obj_state[hoid];
+      if (obj_locker.get_read_lock()) {
+	return true;
+      } // else
+      obj_locker.backfill_waiting_on_read = true;
+      return false;
+    }
+    void drop_backfill_read(const hobject_t &hoid, list<OpRequestRef> *ls) {
+      map<hobject_t, ObjState>::iterator i = obj_state.find(hoid);
+      ObjState& obj_locker = i->second;
+      obj_locker.put_read(ls);
+      if (obj_locker.empty())
+	obj_state.erase(i);
+      else
+	obj_locker.backfill_waiting_on_read = false;
     }
   } rw_manager;
 
