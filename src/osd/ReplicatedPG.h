@@ -486,10 +486,14 @@ protected:
       uint64_t count;              /// number of readers or writers
       list<OpRequestRef> waiters;  /// ops waiting on state change
 
-      /// if set, restart backfill when we can get a read lock
-      bool backfill_waiting_on_read;
+      /**
+       * if set, restart backfill when we can get a read lock
+       * The (non-zero) value indicates what requested the lock
+       * so we can be sure it's not getting double-taken
+       */
+      int backfill_waiting_on_read;
 
-      ObjState() : state(NONE), count(0), backfill_waiting_on_read(false) {}
+      ObjState() : state(NONE), count(0), backfill_waiting_on_read(0) {}
       bool get_read(OpRequestRef op) {
 	if (get_read_lock()) {
 	  return true;
@@ -593,10 +597,18 @@ protected:
 	obj_state.erase(hoid);
       }
     }
-    bool get_backfill_read(const hobject_t &hoid) {
+    enum {
+      BACKEND_INTERFACE = 1,
+      PREP_PUSHES,
+      BACKFILL,
+      PRIMARY,
+      MISSING
+    };
+    bool get_backfill_read(const hobject_t &hoid, int lock_requester) {
       ObjState& obj_locker = obj_state[hoid];
-      assert(!obj_locker.backfill_waiting_on_read);
-      obj_locker.backfill_waiting_on_read = true;
+      assert(!obj_locker.backfill_waiting_on_read ||
+             obj_locker.backfill_waiting_on_read == lock_requester);
+      obj_locker.backfill_waiting_on_read = lock_requester;
       if (obj_locker.get_read_lock()) {
 	return true;
       } // else
@@ -605,12 +617,12 @@ protected:
     void drop_backfill_read(const hobject_t &hoid, list<OpRequestRef> *ls) {
       map<hobject_t, ObjState>::iterator i = obj_state.find(hoid);
       ObjState& obj_locker = i->second;
-      assert(obj_locker.backfill_waiting_on_read = true);
+      assert(obj_locker.backfill_waiting_on_read);
       obj_locker.put_read(ls);
       if (obj_locker.empty())
 	obj_state.erase(i);
       else
-	obj_locker.backfill_waiting_on_read = false;
+	obj_locker.backfill_waiting_on_read = 0;
     }
   } rw_manager;
 
@@ -645,7 +657,7 @@ protected:
    */
   void get_object_recovery_locks(const hobject_t& obj) {
     assert(!is_primary());
-    rw_manager.get_backfill_read(obj);
+    rw_manager.get_backfill_read(obj, RWTracker::BACKEND_INTERFACE);
   }
 
   void drop_object_recovery_locks(const hobject_t& obj) {

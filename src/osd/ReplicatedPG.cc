@@ -281,7 +281,7 @@ void ReplicatedPG::wait_for_missing_object(const hobject_t& soid, OpRequestRef o
   else {
     dout(7) << "missing " << soid << " v " << v << ", recovering." << dendl;
     // nobody can have locks on a missing object, so we must be uncontended
-    assert(rw_manager.get_backfill_read(soid));
+    assert(rw_manager.get_backfill_read(soid, RWTracker::MISSING));
     PGBackend::RecoveryHandle *h = pgbackend->open_recovery_op();
     recover_missing(soid, v, cct->_conf->osd_client_op_priority, h);
     pgbackend->run_recovery_op(h, cct->_conf->osd_client_op_priority);
@@ -7653,7 +7653,7 @@ int ReplicatedPG::recover_primary(int max, ThreadPool::TPHandle &handle)
       soid = p->second;
     }
 
-    if (!rw_manager.get_backfill_read(soid)) {
+    if (!rw_manager.get_backfill_read(soid, RWTracker::PRIMARY)) {
       if (!started)
 	++started; // just lie; this won't impact anything except debug output
       break;
@@ -7823,7 +7823,8 @@ int ReplicatedPG::prep_object_replica_pushes(
    * In almost all cases, therefore, this lock should be uncontended.
    */
   obc->ondisk_read_lock();
-  assert(rw_manager.get_backfill_read(soid)); // yep, "backfill" read
+  // yep, we're taking a "backfill" read
+  assert(rw_manager.get_backfill_read(soid, RWTracker::PREP_PUSHES));
   pgbackend->recover_object(
     soid,
     ObjectContextRef(),
@@ -8022,7 +8023,7 @@ int ReplicatedPG::recover_backfill(
     } else if (pbi.begin == backfill_info.begin) {
       eversion_t& obj_v = backfill_info.objects.begin()->second;
       if (pbi.objects.begin()->second != obj_v) {
-	if (rw_manager.get_backfill_read(backfill_info.begin)) {
+	if (rw_manager.get_backfill_read(backfill_info.begin, RWTracker::BACKFILL)) {
 	  dout(20) << " replacing peer " << pbi.begin << " with local "
 		   << obj_v << dendl;
 	  to_push[pbi.begin] = make_pair(obj_v, pbi.objects.begin()->second);
@@ -8046,7 +8047,7 @@ int ReplicatedPG::recover_backfill(
       backfill_info.pop_front();
       pbi.pop_front();
     } else {
-      if (rw_manager.get_backfill_read(backfill_info.begin)) {
+      if (rw_manager.get_backfill_read(backfill_info.begin, RWTracker::BACKFILL)) {
 	dout(20) << " pushing local " << backfill_info.begin << " "
 		 << backfill_info.objects.begin()->second
 		 << " to peer osd." << backfill_target << dendl;
