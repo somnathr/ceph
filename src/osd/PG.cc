@@ -402,6 +402,7 @@ bool PG::search_for_missing(const pg_info_t &oinfo, const pg_missing_t *omissing
       map<hobject_t, list<OpRequestRef> >::iterator wmo =
 	waiting_for_missing_object.find(soid);
       if (wmo != waiting_for_missing_object.end()) {
+	get_pgbackend()->get_parent()->drop_object_recovery_locks(wmo->first);
 	requeue_ops(wmo->second);
       }
       stats_updated = true;

@@ -170,10 +170,13 @@ void ReplicatedPG::on_local_recover(
     t->register_on_applied_sync(new C_OSD_OndiskWriteUnlock(obc));
 
     publish_stats_to_osd();
-    if (waiting_for_missing_object.count(hoid)) {
+    map<hobject_t, list<OpRequestRef> >::iterator i =
+	  waiting_for_missing_object.find(hoid);
+    if (i != waiting_for_missing_object.end()) {
       dout(20) << " kicking waiters on " << hoid << dendl;
-      requeue_ops(waiting_for_missing_object[hoid]);
-      waiting_for_missing_object.erase(hoid);
+      requeue_ops(i->second);
+      drop_object_recovery_locks(i->first);
+      waiting_for_missing_object.erase(i);
       if (pg_log.get_missing().missing.size() == 0) {
 	requeue_ops(waiting_for_all_missing);
 	waiting_for_all_missing.clear();
@@ -7074,6 +7077,7 @@ ObjectContextRef ReplicatedPG::mark_object_lost(ObjectStore::Transaction *t,
   map<hobject_t, list<OpRequestRef> >::iterator wmo =
     waiting_for_missing_object.find(oid);
   if (wmo != waiting_for_missing_object.end()) {
+    drop_object_recovery_locks(wmo->first);
     requeue_ops(wmo->second);
   }
 
@@ -7345,11 +7349,24 @@ void ReplicatedPG::on_change(ObjectStore::Transaction *t)
   // requeue object waiters
   if (is_primary()) {
     requeue_ops(waiting_for_backfill_pos);
+    map<hobject_t, list<OpRequestRef> >::iterator i;
+    for (waiting_for_missing_object.begin();
+	i != waiting_for_missing_object.end();
+	++i) {
+      drop_object_recovery_locks(i->first);
+    }
     requeue_object_waiters(waiting_for_missing_object);
   } else {
     waiting_for_backfill_pos.clear();
+    map<hobject_t, list<OpRequestRef> >::iterator i;
+    for (waiting_for_missing_object.begin();
+	i != waiting_for_missing_object.end();
+	++i) {
+      drop_object_recovery_locks(i->first);
+    }
     waiting_for_missing_object.clear();
   }
+
   for (map<hobject_t,list<OpRequestRef> >::iterator p = waiting_for_degraded_object.begin();
        p != waiting_for_degraded_object.end();
        waiting_for_degraded_object.erase(p++)) {
