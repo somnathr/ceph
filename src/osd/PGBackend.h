@@ -111,6 +111,17 @@
        const hobject_t &hoid,
        map<string, bufferptr> &attrs) = 0;
 
+     /**
+      * Called when the Backend needs to read an object for recovery purposes.
+      */
+     virtual void get_object_recovery_locks(const hobject_t& obj) = 0;
+     /**
+      * This function is called when the PGBackend has finished reading
+      * an object for recovery/backfill purposes. The PG needs to drop
+      * any read locks at this time.
+      */
+     virtual void drop_object_recovery_locks(const hobject_t& obj) = 0;
+
      virtual ~Listener() {}
    };
    Listener *parent;

@@ -638,6 +638,21 @@ protected:
   }
 
   /**
+   *  we are lucky and don't need to handle blocked locks because primaries
+   *  can't end up here.
+   */
+  void get_object_recovery_locks(const hobject_t& obj) {
+    assert(!is_primary());
+    rw_manager.get_backfill_read(obj);
+  }
+
+  void drop_object_recovery_locks(const hobject_t& obj) {
+    list<OpRequestRef> to_requeue;
+    rw_manager.drop_backfill_read(obj, &to_requeue);
+    requeue_ops(to_requeue);
+  }
+
+  /**
    * Cleans up OpContext
    *
    * @param ctx [in] ctx to clean up
