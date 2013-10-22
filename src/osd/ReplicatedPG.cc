@@ -6583,6 +6583,7 @@ int ReplicatedBackend::build_push_op(const ObjectRecoveryInfo &recovery_info,
 	       << dendl;
       p.set_len(bit.length());
       new_progress.data_complete = true;
+      parent->drop_object_recovery_locks(recovery_info.soid);
     }
     out_op->data.claim_append(bit);
   }
@@ -6592,6 +6593,7 @@ int ReplicatedBackend::build_push_op(const ObjectRecoveryInfo &recovery_info,
 
   if (new_progress.is_complete(recovery_info)) {
     new_progress.data_complete = true;
+    parent->drop_object_recovery_locks(recovery_info.soid);
     if (stat)
       stat->num_objects_recovered++;
   }
@@ -6791,6 +6793,7 @@ void ReplicatedBackend::handle_pull(int peer, PullOp &op, PushOp *reply)
       assert(recovery_info.clone_subset.empty());
     }
 
+    parent->get_object_recovery_locks(soid);
     r = build_push_op(recovery_info, progress, 0, reply);
     if (r < 0)
       prep_push_op_blank(soid, reply);
@@ -8005,20 +8008,25 @@ int ReplicatedPG::recover_backfill(
       // and we can't increment ops without requeueing ourself
       // for recovery.
     } else if (pbi.begin == backfill_info.begin) {
-      if (pbi.objects.begin()->second !=
-	  backfill_info.objects.begin()->second) {
-	dout(20) << " replacing peer " << pbi.begin << " with local "
-		 << backfill_info.objects.begin()->second << dendl;
-	to_push[pbi.begin] = make_pair(backfill_info.objects.begin()->second,
-				       pbi.objects.begin()->second);
-	ops++;
+      eversion_t& obj_v = backfill_info.objects.begin()->second;
+      if (pbi.objects.begin()->second != obj_v) {
+	if (rw_manager.get_backfill_read(backfill_info.begin)) {
+	  dout(20) << " replacing peer " << pbi.begin << " with local "
+		   << obj_v << dendl;
+	  to_push[pbi.begin] = make_pair(obj_v, pbi.objects.begin()->second);
+	  ops++;
+	} else {
+	  work_started = true;
+	  dout(20) << "backfill blocking on " << backfill_info.begin
+		   << "; could not get rw_manager lock" << dendl;
+	  break;
+	}
       } else {
 	dout(20) << " keeping peer " << pbi.begin << " "
 		 << pbi.objects.begin()->second << dendl;
 	// Object was degraded, but won't be recovered
 	if (waiting_for_degraded_object.count(pbi.begin)) {
-	  requeue_ops(
-	    waiting_for_degraded_object[pbi.begin]);
+	  requeue_ops(waiting_for_degraded_object[pbi.begin]);
 	  waiting_for_degraded_object.erase(pbi.begin);
 	}
       }
@@ -8026,15 +8034,22 @@ int ReplicatedPG::recover_backfill(
       backfill_info.pop_front();
       pbi.pop_front();
     } else {
-      dout(20) << " pushing local " << backfill_info.begin << " "
-	       << backfill_info.objects.begin()->second
-	       << " to peer osd." << backfill_target << dendl;
-      to_push[backfill_info.begin] =
-	make_pair(backfill_info.objects.begin()->second,
-		  eversion_t());
-      add_to_stat.insert(backfill_info.begin);
-      backfill_info.pop_front();
-      ops++;
+      if (rw_manager.get_backfill_read(backfill_info.begin)) {
+	dout(20) << " pushing local " << backfill_info.begin << " "
+		 << backfill_info.objects.begin()->second
+		 << " to peer osd." << backfill_target << dendl;
+	to_push[backfill_info.begin] =
+	  make_pair(backfill_info.objects.begin()->second,
+		    eversion_t());
+	add_to_stat.insert(backfill_info.begin);
+	backfill_info.pop_front();
+	ops++;
+      } else {
+	work_started = true;
+	dout(20) << "backfill blocking on " << backfill_info.begin
+		 << "; could not get rw_manager lock" << dendl;
+	break;
+      }
     }
   }
   backfill_pos = backfill_info.begin > pbi.begin ? pbi.begin : backfill_info.begin;
