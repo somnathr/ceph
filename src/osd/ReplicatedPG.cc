@@ -280,6 +280,8 @@ void ReplicatedPG::wait_for_missing_object(const hobject_t& soid, OpRequestRef o
   }
   else {
     dout(7) << "missing " << soid << " v " << v << ", recovering." << dendl;
+    // nobody can have locks on a missing object, so we must be uncontended
+    assert(rw_manager.get_backfill_read(soid));
     PGBackend::RecoveryHandle *h = pgbackend->open_recovery_op();
     recover_missing(soid, v, cct->_conf->osd_client_op_priority, h);
     pgbackend->run_recovery_op(h, cct->_conf->osd_client_op_priority);
