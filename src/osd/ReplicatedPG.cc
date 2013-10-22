@@ -7812,6 +7812,7 @@ int ReplicatedPG::prep_object_replica_pushes(
    * In almost all cases, therefore, this lock should be uncontended.
    */
   obc->ondisk_read_lock();
+  rw_manager.get_backfill_read(soid); // yep, "backfill" read
   pgbackend->recover_object(
     soid,
     ObjectContextRef(),
