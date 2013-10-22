@@ -280,6 +280,7 @@ void ReplicatedPG::wait_for_missing_object(const hobject_t& soid, OpRequestRef o
   }
   else if (missing_loc.find(soid) == missing_loc.end()) {
     dout(7) << "missing " << soid << " v " << v << ", is unfound." << dendl;
+    assert(rw_manager.get_backfill_read(soid, RWTracker::MISSING));
   }
   else {
     dout(7) << "missing " << soid << " v " << v << ", recovering." << dendl;
