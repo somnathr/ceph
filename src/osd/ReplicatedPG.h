@@ -595,15 +595,17 @@ protected:
     }
     bool get_backfill_read(const hobject_t &hoid) {
       ObjState& obj_locker = obj_state[hoid];
+      assert(!obj_locker.backfill_waiting_on_read);
+      obj_locker.backfill_waiting_on_read = true;
       if (obj_locker.get_read_lock()) {
 	return true;
       } // else
-      obj_locker.backfill_waiting_on_read = true;
       return false;
     }
     void drop_backfill_read(const hobject_t &hoid, list<OpRequestRef> *ls) {
       map<hobject_t, ObjState>::iterator i = obj_state.find(hoid);
       ObjState& obj_locker = i->second;
+      assert(obj_locker.backfill_waiting_on_read = true);
       obj_locker.put_read(ls);
       if (obj_locker.empty())
 	obj_state.erase(i);
