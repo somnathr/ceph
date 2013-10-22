@@ -7079,6 +7079,7 @@ ObjectContextRef ReplicatedPG::mark_object_lost(ObjectStore::Transaction *t,
   if (wmo != waiting_for_missing_object.end()) {
     drop_object_recovery_locks(wmo->first);
     requeue_ops(wmo->second);
+    waiting_for_missing_object.erase(wmo);
   }
 
   // Add log entry
