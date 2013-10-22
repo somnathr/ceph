@@ -6685,6 +6685,8 @@ bool ReplicatedBackend::handle_push_reply(int peer, PushReplyOp &op, PushOp *rep
 	       << pi->recovery_progress.data_recovered_to
 	       << " of " << pi->recovery_info.copy_subset << dendl;
       ObjectRecoveryProgress new_progress;
+      // we don't need to take the recovery locks here because we already have
+      // them from before
       int r = build_push_op(
 	pi->recovery_info,
 	pi->recovery_progress, &new_progress, reply,
@@ -7648,6 +7650,13 @@ int ReplicatedPG::recover_primary(int max, ThreadPool::TPHandle &handle)
       latest = 0;
       soid = p->second;
     }
+
+    if (!rw_manager.get_backfill_read(soid)) {
+      if (!started)
+	++started; // just lie; this won't impact anything except debug output
+      break;
+    }
+
     const pg_missing_t::item& item = missing.missing.find(p->second)->second;
     ++p;
 

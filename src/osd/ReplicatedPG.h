@@ -865,6 +865,7 @@ protected:
   // Cancels/resets pulls from peer
   void check_recovery_sources(const OSDMapRef map);
 
+  // Make sure you have the recovery locks on the object before calling in here
   int recover_missing(
     const hobject_t& oid,
     eversion_t v,
