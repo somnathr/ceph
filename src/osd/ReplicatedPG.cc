@@ -7481,8 +7481,7 @@ bool ReplicatedPG::start_recovery_ops(
   ThreadPool::TPHandle &handle,
   int& ops_begun)
 {
-  int& started = ops_begun;
-  started = 0;
+  ops_begun = 0;
   bool work_in_progress = false;
   assert(is_primary());
 
@@ -7506,24 +7505,24 @@ bool ReplicatedPG::start_recovery_ops(
   if (num_missing == num_unfound) {
     // All of the missing objects we have are unfound.
     // Recover the replicas.
-    started = recover_replicas(max, handle);
+    ops_begun = recover_replicas(max, handle);
   }
-  if (!started) {
+  if (!ops_begun) {
     // We still have missing objects that we should grab from replicas.
-    started += recover_primary(max, handle);
+    ops_begun += recover_primary(max, handle);
   }
-  if (!started && num_unfound != get_num_unfound()) {
+  if (!ops_begun && num_unfound != get_num_unfound()) {
     // second chance to recovery replicas
-    started = recover_replicas(max, handle);
+    ops_begun = recover_replicas(max, handle);
   }
 
-  if (started)
+  if (ops_begun)
     work_in_progress = true;
 
   bool deferred_backfill = false;
   if (recovering.empty() &&
       state_test(PG_STATE_BACKFILL) &&
-      backfill_target >= 0 && started < max &&
+      backfill_target >= 0 && ops_begun < max &&
       missing.num_missing() == 0 &&
       !waiting_on_backfill) {
     if (get_osdmap()->test_flag(CEPH_OSDMAP_NOBACKFILL)) {
@@ -7543,12 +7542,12 @@ bool ReplicatedPG::start_recovery_ops(
       }
       deferred_backfill = true;
     } else {
-      started += recover_backfill(max - started, handle, work_in_progress);
+      ops_begun += recover_backfill(max - ops_begun, handle, work_in_progress);
     }
   }
 
-  dout(10) << " started " << started << dendl;
-  osd->logger->inc(l_osd_rop, started);
+  dout(10) << " started " << ops_begun << dendl;
+  osd->logger->inc(l_osd_rop, ops_begun);
 
   if (!recovering.empty() ||
       work_in_progress || recovery_ops_active > 0 || deferred_backfill)
