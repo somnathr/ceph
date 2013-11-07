@@ -2009,6 +2009,7 @@ PG *OSD::get_pg_or_queue_for_pg(spg_t pgid, OpRequestRef op)
 
 bool OSD::_have_pg(spg_t pgid)
 {
+  RWLock::RLocker l(pg_map_lock);
   assert(osd_lock.is_locked());
   RWLock::RLocker l(pg_map_lock);
   return pg_map.count(pgid);
@@ -2208,6 +2209,7 @@ struct pistate {
 
 void OSD::build_past_intervals_parallel()
 {
+  RWLock::RLocker l(pg_map_lock);
   map<PG*,pistate> pis;
 
   // calculate untion of map range
@@ -6030,6 +6032,20 @@ void OSD::consume_map()
 
   int num_pg_primary = 0, num_pg_replica = 0, num_pg_stray = 0;
   list<PGRef> to_remove;
+  {
+    RWLock::RLocker l(pg_map_lock);
+    // scan pg's
+    for (hash_map<pg_t,PG*>::iterator it = pg_map.begin();
+	 it != pg_map.end();
+	 ++it) {
+      PG *pg = it->second;
+      pg->lock();
+      if (pg->is_primary())
+	num_pg_primary++;
+      else if (pg->is_replica())
+	num_pg_replica++;
+      else
+	num_pg_stray++;
 
   // scan pg's
   {
@@ -6056,7 +6072,6 @@ void OSD::consume_map()
       pg->unlock();
     }
   }
-
   for (list<PGRef>::iterator i = to_remove.begin();
        i != to_remove.end();
        to_remove.erase(i++)) {
@@ -7248,6 +7263,7 @@ void OSD::handle_pg_remove(OpRequestRef op)
 
 void OSD::_remove_pg(PG *pg)
 {
+  RWLock::WLocker l(pg_map_lock);
   ObjectStore::Transaction *rmt = new ObjectStore::Transaction;
 
   // on_removal, which calls remove_watchers_and_notifies, and the erasure from
