@@ -7737,7 +7737,6 @@ void OSD::handle_op(OpRequestRef op, OSDMapRef osdmap)
 		      << ", client e" << m->get_map_epoch()
 		      << " pg " << pgid
 		      << " features " << m->get_connection()->get_features()
-		      << "\n";
     service.reply_op_error(op, -ENXIO);
     return;
   }
