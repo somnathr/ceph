@@ -683,6 +683,9 @@ int Pipe::accept()
   msgr->lock.Unlock();
   pipe_lock.Unlock();
 
+  // notify
+  msgr->ms_deliver_handle_accept(connection_state.get());
+
   r = tcp_write((char*)&reply, sizeof(reply));
   if (r < 0) {
     goto fail_registered;
