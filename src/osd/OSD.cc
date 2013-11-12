@@ -7737,28 +7737,6 @@ void OSD::handle_op(OpRequestRef op, OSDMapRef osdmap)
     dout(7) << "don't have sender's osdmap; assuming it was valid and that client will resend" << dendl;
     return;
   }
-  if (!send_map->have_pg_pool(pgid.pool())) {
-    dout(7) << "dropping request; pool did not exist" << dendl;
-    clog.warn() << m->get_source_inst() << " invalid " << m->get_reqid()
-		      << " pg " << m->get_pg()
-		      << " to osd." << whoami
-		      << " in e" << osdmap->get_epoch()
-		      << ", client e" << m->get_map_epoch()
-		      << " when pool " << m->get_pg().pool() << " did not exist"
-		      << "\n";
-    return;
-  } else if (send_map->get_pg_acting_role(pgid.pgid, whoami) < 0) {
-    dout(7) << "we are invalid target" << dendl;
-    clog.warn() << m->get_source_inst() << " misdirected " << m->get_reqid()
-		      << " pg " << m->get_pg()
-		      << " to osd." << whoami
-		      << " in e" << osdmap->get_epoch()
-		      << ", client e" << m->get_map_epoch()
-		      << " pg " << pgid
-		      << " features " << m->get_connection()->get_features()
-    service.reply_op_error(op, -ENXIO);
-    return;
-  }
 
   PG *pg = get_pg_or_queue_for_pg(pgid, op);
   if (pg) {
