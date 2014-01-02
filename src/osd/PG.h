@@ -187,7 +187,7 @@ struct PGPool {
 class PG {
 public:
   std::string gen_prefix() const;
-
+  deque<OpRequestRef> op_queue;
   /*** PG ****/
 protected:
   OSDService *osd;
@@ -200,6 +200,45 @@ public:
   void update_snap_mapper_bits(uint32_t bits) {
     snap_mapper.update_bits(bits);
   }
+
+  bool do_op_fast(OpRequestRef op);
+
+  /*ThreadPool op_tp;
+  struct OpWQ : public ThreadPool::WorkQueue<OpRequestRef> {
+    PG *placementG;
+    OpWQ(PG *pg, time_t timeout, time_t suicide_timeout, ThreadPool *tp)
+      : ThreadPool::WorkQueue<OpRequestRef>("PG::OpWQ", timeout, suicide_timeout, tp), placementG(pg) {}
+
+    bool _enqueue(OpRequestRef *op) {
+      placementG->op_queue.push_back(op);
+      return true;
+    }
+    void _dequeue(OpRequestRef *op) {
+      assert(0);
+    }
+    bool _empty() {
+      return placementG->op_queue.empty();
+    }
+    OpRequestRef* _dequeue() {
+      if (placementG->op_queue.empty())
+	return NULL;
+      OpRequestRef *op = placementG->op_queue.front();
+      placementG->op_queue.pop_front();
+      return op;
+    }
+    void _process(OpRequestRef *op, ThreadPool::TPHandle &handle) {
+      placementG->_do_op(*op, handle);
+    }
+    void _process_finish(OpRequestRef *op) {
+      //placementG->_finish_op(op);
+    }
+    void _clear() {
+      assert(placementG->op_queue.empty());
+    }
+  } op_wq;
+
+  void _do_op( OpRequestRef op, ThreadPool::TPHandle &handle);*/
+
 protected:
   // Ops waiting for map, should be queued at back
   Mutex map_lock;
@@ -208,7 +247,7 @@ protected:
   OSDMapRef last_persisted_osdmap_ref;
   PGPool pool;
 
-  void queue_op(OpRequestRef op);
+  int queue_op(const OpRequestRef& op);
   void take_op_map_waiters();
 
   void update_osdmap_ref(OSDMapRef newmap) {
@@ -467,6 +506,14 @@ protected:
       return end == hobject_t::get_max();
     }
 
+    /// removes items <= soid and adjusts begin to the first object
+    void trim_to(const hobject_t &soid) {
+      trim();
+      while (!objects.empty() && objects.begin()->first <= soid) {
+	pop_front();
+      }
+    }
+
     /// Adjusts begin to the first object
     void trim() {
       if (!objects.empty())
@@ -479,10 +526,7 @@ protected:
     void pop_front() {
       assert(!objects.empty());
       objects.erase(objects.begin());
-      if (objects.empty())
-	begin = end;
-      else
-	begin = objects.begin()->first;
+      trim();
     }
 
     /// dump
@@ -522,7 +566,6 @@ protected:
   bool flushed;
 
   // Ops waiting on backfill_pos to change
-  list<OpRequestRef> waiting_for_backfill_pos;
   list<OpRequestRef>            waiting_for_active;
   list<OpRequestRef>            waiting_for_all_missing;
   map<hobject_t, list<OpRequestRef> > waiting_for_missing_object,
@@ -645,9 +688,14 @@ public:
 
   virtual void check_local() = 0;
 
-  virtual int start_recovery_ops(
+  /**
+   * @param ops_begun returns how many recovery ops the function started
+   * @returns true if any useful work was accomplished; false otherwise
+   */
+  virtual bool start_recovery_ops(
     int max, RecoveryCtx *prctx,
-    ThreadPool::TPHandle &handle) = 0;
+    ThreadPool::TPHandle &handle,
+    int *ops_begun) = 0;
 
   void purge_strays();
 
@@ -1745,10 +1793,10 @@ public:
   bool acting_up_affected(const vector<int>& newup, const vector<int>& newacting);
 
   // OpRequest queueing
-  bool can_discard_op(OpRequestRef op);
+  bool can_discard_op(const OpRequestRef& op);
   bool can_discard_scan(OpRequestRef op);
   bool can_discard_backfill(OpRequestRef op);
-  bool can_discard_request(OpRequestRef op);
+  bool can_discard_request(const OpRequestRef& op);
 
   template<typename T, int MSGTYPE>
   bool can_discard_replica_op(OpRequestRef op);
@@ -1768,7 +1816,7 @@ public:
     return e <= get_osdmap()->get_epoch();
   }
 
-  bool op_has_sufficient_caps(OpRequestRef op);
+  bool op_has_sufficient_caps(const OpRequestRef& op);
 
 
   // recovery bits
@@ -1802,7 +1850,12 @@ public:
     ThreadPool::TPHandle &handle
   ) = 0;
 
-  virtual void do_op(OpRequestRef op) = 0;
+  // abstract bits
+  virtual void do_request_op_fast(
+    const OpRequestRef& op
+  ) = 0;
+
+  virtual void do_op(const OpRequestRef& op) = 0;
   virtual void do_sub_op(OpRequestRef op) = 0;
   virtual void do_sub_op_reply(OpRequestRef op) = 0;
   virtual void do_scan(

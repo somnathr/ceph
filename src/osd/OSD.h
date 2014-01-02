@@ -54,6 +54,7 @@ using namespace __gnu_cxx;
 #include "common/simple_cache.hpp"
 #include "common/sharedptr_registry.hpp"
 #include "common/PrioritizedQueue.h"
+#include <queue>
 
 #define CEPH_OSD_PROTOCOL    10 /* cluster internal */
 
@@ -351,10 +352,52 @@ public:
    * working from old maps.
    */
   OSDMapRef next_osdmap;
+  Cond pre_publish_cond;
   void pre_publish_map(OSDMapRef map) {
     Mutex::Locker l(pre_publish_lock);
     next_osdmap = map;
   }
+
+  /// map epochs reserved below
+  map<epoch_t, unsigned> map_reservations;
+
+  /// gets ref to next_osdmap and registers the epoch as reserved
+  OSDMapRef get_nextmap_reserved() {
+    Mutex::Locker l(pre_publish_lock);
+    if (!next_osdmap)
+      return OSDMapRef();
+    epoch_t e = next_osdmap->get_epoch();
+    map<epoch_t, unsigned>::iterator i =
+      map_reservations.insert(make_pair(e, 0)).first;
+    i->second++;
+    return next_osdmap;
+  }
+  /// releases reservation on map
+  void release_map(OSDMapRef osdmap) {
+    Mutex::Locker l(pre_publish_lock);
+    map<epoch_t, unsigned>::iterator i =
+      map_reservations.find(osdmap->get_epoch());
+    assert(i != map_reservations.end());
+    assert(i->second > 0);
+    if (--(i->second) == 0) {
+      map_reservations.erase(i);
+    }
+    pre_publish_cond.Signal();
+  }
+  /// blocks until there are no reserved maps prior to next_osdmap
+  void await_reserved_maps() {
+    Mutex::Locker l(pre_publish_lock);
+    assert(next_osdmap);
+    while (true) {
+      map<epoch_t, unsigned>::iterator i = map_reservations.begin();
+      if (i == map_reservations.end() || i->first >= next_osdmap->get_epoch()) {
+	break;
+      } else {
+	pre_publish_cond.Wait(pre_publish_lock);
+      }
+    }
+  }
+
   ConnectionRef get_con_osd_cluster(int peer, epoch_t from_epoch);
   pair<ConnectionRef,ConnectionRef> get_con_osd_hb(int peer, epoch_t from_epoch);  // (back, front)
   void send_message_osd_cluster(int peer, Message *m, epoch_t from_epoch);
@@ -696,6 +739,7 @@ protected:
   void tick();
   void _dispatch(Message *m);
   void dispatch_op(OpRequestRef op);
+  bool dispatch_op_fast(const OpRequestRef& op, const OSDMapRef& osdmap);
 
   void check_osdmap_features();
 
@@ -703,6 +747,7 @@ protected:
   friend class OSDSocketHook;
   class OSDSocketHook *asok_hook;
   bool asok_command(string command, cmdmap_t& cmdmap, string format, ostream& ss);
+  bool returnDummy(Message* m);
 
 public:
   ClassHandler  *class_handler;
@@ -817,8 +862,35 @@ public:
     ConnectionRef con;
     WatchConState wstate;
 
-    Session() : auid(-1), last_sent_epoch(0), con(0) {}
+    Mutex session_dispatch_lock;
+    list<OpRequestRef> waiting_on_map;
+
+    Session() :
+      auid(-1), last_sent_epoch(0), con(0),
+      session_dispatch_lock("Session::session_dispatch_lock")
+    {}
   };
+  void dispatch_session_waiting(Session *session, const OSDMapRef& osdmap);
+  Mutex session_waiting_for_map_lock;
+  set<Session*> session_waiting_for_map;
+  /// Caller assumes refs for included Sessions
+  void get_sessions_waiting_for_map(set<Session*> *out) {
+    Mutex::Locker l(session_waiting_for_map_lock);
+    out->swap(session_waiting_for_map);
+  }
+  void register_session_waiting_on_map(Session *session) {
+    Mutex::Locker l(session_waiting_for_map_lock);
+    session->get();
+    session_waiting_for_map.insert(session);
+  }
+  void clear_session_waiting_on_map(Session *session) {
+    Mutex::Locker l(session_waiting_for_map_lock);
+    set<Session*>::iterator i = session_waiting_for_map.find(session);
+    if (i != session_waiting_for_map.end()) {
+      (*i)->put();
+      session_waiting_for_map.erase(i);
+    }
+  }
 
 private:
   // -- heartbeat --
@@ -910,11 +982,30 @@ public:
     }
   } heartbeat_dispatcher;
 
+  Mutex op_thread_lock1, op_thread_lock2, op_thread_lock3, op_thread_lock4, op_thread_lock5, 
+	op_thread_lock6, op_thread_lock7, op_thread_lock8;
+  Cond op_thread_cond1, op_thread_cond2, op_thread_cond3, op_thread_cond4, op_thread_cond5, 
+	op_thread_cond6, op_thread_cond7, op_thread_cond8;
+  //map<PGRef, list<OpRequestRef> > pg_for_fast_processing;
+  //map<PG*, list<OpRequestRef> > pg_for_fast_processing;
+  //multimap<PGRef, OpRequestRef> pg_for_fast_processing;
+  queue< pair <PGRef, OpRequestRef> > pg_for_fast_processing1;
+  queue< pair <PGRef, OpRequestRef> > pg_for_fast_processing2;
+  queue< pair <PGRef, OpRequestRef> > pg_for_fast_processing3;
+  queue< pair <PGRef, OpRequestRef> > pg_for_fast_processing4;
+  queue< pair <PGRef, OpRequestRef> > pg_for_fast_processing5;
+  queue< pair <PGRef, OpRequestRef> > pg_for_fast_processing6;
+  queue< pair <PGRef, OpRequestRef> > pg_for_fast_processing7;
+  queue< pair <PGRef, OpRequestRef> > pg_for_fast_processing8;
+
+  //queue< pair <OSDMapRef, OpRequestRef> > pg_for_fast_processing;
+
 private:
   // -- stats --
   Mutex stat_lock;
   osd_stat_t osd_stat;
-
+  atomic_t stop_io_thread;
+    
   void update_osd_stat();
   
   // -- waiters --
@@ -952,6 +1043,7 @@ private:
 					       PGRef > {
     Mutex qlock;
     map<PG*, list<OpRequestRef> > pg_for_processing;
+    //map<PGRef, list<OpRequestRef> > pg_for_processing;
     OSD *osd;
     PrioritizedQueue<pair<PGRef, OpRequestRef>, entity_inst_t > pqueue;
     OpWQ(OSD *o, time_t ti, ThreadPool *tp)
@@ -1002,12 +1094,39 @@ private:
       unlock();
     }
     bool _empty() {
+      //Mutex::Locker l(qlock);
       return pqueue.empty();
     }
     void _process(PGRef pg, ThreadPool::TPHandle &handle);
   } op_wq;
 
-  void enqueue_op(PG *pg, OpRequestRef op);
+  class opThreadFastThread : public Thread {
+    OSD *osd;
+    uint32_t pool_number;
+ 
+  public:
+    opThreadFastThread(OSD *pOsd, uint32_t thr_pool_num) : osd(pOsd), pool_number(thr_pool_num) {}
+    void *entry() {
+      osd->process_op_fast(pool_number);
+      return 0;
+    }
+  } op_process_thread1,op_process_thread2, op_process_thread3, op_process_thread4, 
+    op_process_thread5, op_process_thread6, op_process_thread7, op_process_thread8,
+    op_process_thread9, op_process_thread10, op_process_thread11, op_process_thread12,
+    op_process_thread13, op_process_thread14, op_process_thread15, op_process_thread16, 
+    op_process_thread17, op_process_thread18, op_process_thread19, op_process_thread20, 
+    op_process_thread21, op_process_thread22, op_process_thread23, op_process_thread24, 
+    op_process_thread25, op_process_thread26, op_process_thread27, op_process_thread28, 
+    op_process_thread29, op_process_thread30, op_process_thread31, op_process_thread32,
+    op_process_thread33, op_process_thread34, op_process_thread35, op_process_thread36,
+    op_process_thread37, op_process_thread38, op_process_thread39, op_process_thread40;
+ 
+
+  void start_op_threads();
+  void stop_op_threads();
+  void process_op_fast(uint32_t pool_number);
+
+  void enqueue_op(PG *pg, const OpRequestRef& op);
   void dequeue_op(
     PGRef pg, OpRequestRef op,
     ThreadPool::TPHandle &handle);
@@ -1091,6 +1210,7 @@ private:
   void forget_peer_epoch(int p, epoch_t e);
 
   bool _share_map_incoming(entity_name_t name, Connection *con, epoch_t epoch,
+			   const OSDMapRef& osdmap,
 			   Session *session = 0);
   void _share_map_outgoing(int peer, Connection *con,
 			   OSDMapRef map = OSDMapRef());
@@ -1142,13 +1262,16 @@ private:
 
 protected:
   // -- placement groups --
-  hash_map<pg_t, PG*> pg_map;
-  map<pg_t, list<OpRequestRef> > waiting_for_pg;
+  RWLock pg_map_lock;
+  hash_map<pg_t, PG*> pg_map; // protected by pg_map_lock
+  map<pg_t, list<OpRequestRef> > waiting_for_pg; // protected by pg_map_lock
+
   map<pg_t, list<PG::CephPeeringEvtRef> > peering_wait_for_split;
   PGRecoveryStats pg_recovery_stats;
 
   PGPool _get_pool(int id, OSDMapRef createmap);
 
+  PG *get_pg_or_queue_for_pg(pg_t pgid, OpRequestRef op);
   bool  _have_pg(pg_t pgid);
   PG   *_lookup_lock_pg_with_map_lock_held(pg_t pgid);
   PG   *_lookup_lock_pg(pg_t pgid);
@@ -1191,23 +1314,25 @@ protected:
   void build_past_intervals_parallel();
 
   void calc_priors_during(pg_t pgid, epoch_t start, epoch_t end, set<int>& pset);
-  void project_pg_history(pg_t pgid, pg_history_t& h, epoch_t from,
-			  const vector<int>& lastup, const vector<int>& lastacting);
 
-  void wake_pg_waiters(pg_t pgid) {
-    if (waiting_for_pg.count(pgid)) {
-      take_waiters_front(waiting_for_pg[pgid]);
-      waiting_for_pg.erase(pgid);
+  /// project pg history from from to now
+  bool project_pg_history(
+    pg_t pgid, pg_history_t& h, epoch_t from,
+    const vector<int>& lastup, const vector<int>& lastacting
+    ); ///< @return false if there was a map gap between from and now
+
+  void wake_pg_waiters(PG* pg, pg_t pgid) {
+    // Need write lock on pg_map
+    map<pg_t, list<OpRequestRef> >::iterator i = waiting_for_pg.find(pgid);
+    if (i != waiting_for_pg.end()) {
+      for (list<OpRequestRef>::iterator j = i->second.begin();
+	   j != i->second.end();
+	   ++j) {
+	enqueue_op(pg, *j);
+      }
+      waiting_for_pg.erase(i);
     }
   }
-  void wake_all_pg_waiters() {
-    for (map<pg_t, list<OpRequestRef> >::iterator p = waiting_for_pg.begin();
-	 p != waiting_for_pg.end();
-	 ++p)
-      take_waiters_front(p->second);
-    waiting_for_pg.clear();
-  }
-
 
   // -- pg creation --
   struct create_pg_info {
@@ -1335,9 +1460,6 @@ protected:
   void handle_pg_info(OpRequestRef op);
   void handle_pg_trim(OpRequestRef op);
 
-  void handle_pg_scan(OpRequestRef op);
-
-  void handle_pg_backfill(OpRequestRef op);
   void handle_pg_backfill_reserve(OpRequestRef op);
   void handle_pg_recovery_reserve(OpRequestRef op);
 
@@ -1692,12 +1814,29 @@ protected:
   }
 
  private:
+  bool ms_can_fast_dispatch(Message *m) const {
+    switch (m->get_type()) {
+    case CEPH_MSG_OSD_OP:
+    case MSG_OSD_SUBOP:
+    case MSG_OSD_SUBOPREPLY:
+    case MSG_OSD_PG_PUSH:
+    case MSG_OSD_PG_PULL:
+    case MSG_OSD_PG_PUSH_REPLY:
+    case MSG_OSD_PG_SCAN:
+    case MSG_OSD_PG_BACKFILL:
+      return true;
+    default:
+      return false;
+    }
+  }
+  void ms_fast_dispatch(Message *m);
   bool ms_dispatch(Message *m);
   bool ms_get_authorizer(int dest_type, AuthAuthorizer **authorizer, bool force_new);
   bool ms_verify_authorizer(Connection *con, int peer_type,
 			    int protocol, bufferlist& authorizer, bufferlist& authorizer_reply,
 			    bool& isvalid, CryptoKey& session_key);
   void ms_handle_connect(Connection *con);
+  void ms_handle_accept(Connection *con);
   bool ms_handle_reset(Connection *con);
   void ms_handle_remote_reset(Connection *con) {}
 
@@ -1759,10 +1898,10 @@ public:
   void handle_rep_scrub(MOSDRepScrub *m);
   void handle_scrub(struct MOSDScrub *m);
   void handle_osd_ping(class MOSDPing *m);
-  void handle_op(OpRequestRef op);
+  void handle_op(const OpRequestRef& op, const OSDMapRef& osdmap);
 
   template <typename T, int MSGTYPE>
-  void handle_replica_op(OpRequestRef op);
+  void handle_replica_op(OpRequestRef op, OSDMapRef osdmap);
 
   /// check if we can throw out op from a disconnected client
   static bool op_is_discardable(class MOSDOp *m);
@@ -1770,7 +1909,7 @@ public:
 public:
   void force_remount();
 
-  int init_op_flags(OpRequestRef op);
+  int init_op_flags(const OpRequestRef& op);
 
   OSDService service;
   friend class OSDService;

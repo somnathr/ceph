@@ -174,10 +174,14 @@ public:
       {
 	Mutex::Locker l(_lock);
 	if (_empty())
+        {
+	  //printf("_void_dequeue:2\n");
 	  return 0;
+        }
 	U u = _dequeue();
 	to_process.push_back(u);
       }
+      //printf("_void_dequeue:3\n");
       return ((void*)1); // Not used
     }
     void _void_process(void *, TPHandle &handle) {
@@ -186,7 +190,7 @@ public:
       U u = to_process.front();
       to_process.pop_front();
       _lock.Unlock();
-
+	
       _process(u, handle);
 
       _lock.Lock();
@@ -218,6 +222,7 @@ public:
       Mutex::Locker l(pool->_lock);
       _enqueue(item);
       pool->_cond.SignalOne();
+      //printf("queue:3\n");
     }
     void queue_front(T item) {
       Mutex::Locker l(pool->_lock);

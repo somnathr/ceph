@@ -118,6 +118,54 @@ int IndexManager::build_index(coll_t c, const char *path, Index *index) {
   }
 }
 
+int IndexManager::get_fd_fast(coll_t& c, const ghobject_t &oid, const string& baseDir, int flags, int& fd, string* fullPath)
+{
+	CollectionIndex* one_index = NULL;
+
+        {
+		Mutex::Locker l(lock);
+		hash_map<coll_t, CollectionIndex*>::iterator it = col_indices_io_path.find(c);	
+		if (it == col_indices_io_path.end())
+		{
+			char path[PATH_MAX];
+			snprintf(path, sizeof(path), "%s/current/%s", baseDir.c_str(), c.to_str().c_str());
+			//printf("get_fd_fast1 = %s\n", path);
+	
+			one_index = new HashIndex(c, path, g_conf->filestore_merge_threshold,
+							g_conf->filestore_split_multiple,
+							CollectionIndex::HOBJECT_WITH_POOL,
+							g_conf->filestore_index_retry_probability);
+			
+			col_indices_io_path[c] = one_index;
+				
+			
+		}
+		else
+		{
+			one_index = it->second;
+		}
+	}
+	if (NULL == one_index)
+	{
+		return -1;
+	}
+	//printf("get_fd_fast3\n");
+	if (fullPath)
+        {	
+		fd = one_index->fast_lookup(oid, flags, *fullPath);
+	}
+        else
+	{
+		string full_path;
+		fd = one_index->fast_lookup(oid, flags, full_path);
+	}
+
+        //printf("get_fd_fast4 :: fd = %d\n", fd);
+	
+	return fd;	
+	
+}
+
 int IndexManager::get_index(coll_t c, const char *path, Index *index) {
   Mutex::Locker l(lock);
   while (1) {

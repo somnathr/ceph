@@ -15,12 +15,213 @@
 #ifndef CEPH_SHAREDCACHE_H
 #define CEPH_SHAREDCACHE_H
 
-#include <map>
+//#include <map>
 #include <list>
 #include <memory>
 #include <utility>
 #include "common/Mutex.h"
 #include "common/Cond.h"
+#include "common/RWLock.h"
+
+
+template <class K, class V>
+class SharedUnorderedCache {
+  typedef std::tr1::shared_ptr<V> VPtr;
+  RWLock unordered_map_lock;
+  size_t max_size;
+  unsigned size;
+
+  hash_map<K, VPtr> contents;
+
+  //hash_map<K, WeakVPtr> weak_refs;
+
+  void trim_cache() {
+    while (size > max_size) {
+      contents.erase(contents.begin());
+      --size;
+    }
+  }
+
+  void lru_remove(const K& key) {
+    typename hash_map<K, VPtr>::iterator i =
+      contents.find(key);
+    if (i == contents.end())
+      return;
+    --size;
+    contents.erase(i);
+  }
+
+  int lru_add(const K& key, VPtr& val, bool lookup) {
+    typename hash_map<K, VPtr>::iterator i =
+      contents.find(key);
+    if (i != contents.end()) {
+      if (lookup)
+      {
+        val = i->second;
+      }
+
+    } else {
+
+      if (lookup)
+      {
+        return -1;
+      }
+      ++size;
+      contents[key] = val;
+      trim_cache();
+    }
+    return 0;
+  }
+
+public:
+  SharedUnorderedCache(size_t max_size = 20)
+    : unordered_map_lock("SharedUnordered::RWlock"), max_size(max_size), size(0) {}
+
+  ~SharedUnorderedCache() {
+    contents.clear();
+  }
+
+  void clear(const K& key) {
+    {
+      RWLock::WLocker l(unordered_map_lock);
+      lru_remove(key);
+    }
+  }
+
+  void set_size(size_t new_size) {
+    {
+      RWLock::WLocker l(unordered_map_lock);
+      max_size = new_size;
+      trim_cache();
+    }
+  }
+
+
+  int lookup(const K& key, VPtr& val)
+  {
+	RWLock::RLocker l(unordered_map_lock);
+        return lru_add(key, val, true);
+  }
+
+  int add(const K& key, VPtr& val) {
+    {
+      RWLock::WLocker l(unordered_map_lock);
+      lru_add(key, val, false);
+    }
+    return 0;
+  }
+};
+
+
+template <class K, class V>
+class SharedLRUUnordered {
+  typedef std::tr1::shared_ptr<V> VPtr;
+  Mutex lock;
+  size_t max_size;
+  unsigned size;
+
+  hash_map<K, typename list<pair<K, VPtr> >::iterator > contents;
+  list<pair<K, VPtr> > lru;
+
+  //hash_map<K, WeakVPtr> weak_refs;
+
+  void trim_cache() {
+    while (size > max_size) {
+      lru_remove(lru.back().first);
+    }
+  }
+
+  void lru_remove(const K& key) {
+    typename hash_map<K, typename list<pair<K, VPtr> >::iterator>::iterator i =
+      contents.find(key);
+    if (i == contents.end())
+      return;
+    lru.erase(i->second);
+    --size;
+    contents.erase(i);
+  }
+
+  int lru_add(const K& key, VPtr& val, bool lookup) {
+    typename hash_map<K, typename list<pair<K, VPtr> >::iterator>::iterator i =
+      contents.find(key);
+    if (i != contents.end()) {
+      lru.splice(lru.begin(), lru, i->second);
+      if (lookup)
+      {
+      	val = i->second->second;
+      }
+      
+    } else {
+     
+      if (lookup)
+      {
+	return -1;
+      }
+      ++size;
+      lru.push_front(make_pair(key, val));
+      contents[key] = lru.begin();
+      trim_cache();
+    }
+    return 0;
+  }
+
+  /*void remove(const K& key) {
+    Mutex::Locker l(lock);
+    weak_refs.erase(key);
+    cond.Signal();
+  }*/
+
+  /*class Cleanup {
+  public:
+    SharedLRUUnordered<K, V> *cache;
+    K key;
+    Cleanup(SharedLRUUnordered<K, V> *cache, const K& key) : cache(cache), key(key) {}
+    void operator()(V *ptr) {
+      cache->remove(key);
+      delete ptr;
+    }
+  };*/
+
+public:
+  SharedLRUUnordered(size_t max_size = 20)
+    : lock("SharedLRUUnordered::lock"), max_size(max_size), size(0) {}
+
+  ~SharedLRUUnordered() {
+    contents.clear();
+    lru.clear();
+  }
+
+  void clear(const K& key) {
+    {
+      Mutex::Locker l(lock);
+      lru_remove(key);
+    }
+  }
+
+  void set_size(size_t new_size) {
+    {
+      Mutex::Locker l(lock);
+      max_size = new_size;
+      trim_cache();
+    }
+  }
+
+
+  int lookup(const K& key, VPtr& val) 
+  {
+	Mutex::Locker l(lock);
+	return lru_add(key, val, true);
+  }
+
+  int add(const K& key, VPtr& val) {
+    {
+      Mutex::Locker l(lock);
+      lru_add(key, val, false);
+    }
+    return 0;
+  }
+};
+
 
 template <class K, class V>
 class SharedLRU {
@@ -29,6 +230,7 @@ class SharedLRU {
   Mutex lock;
   size_t max_size;
   Cond cond;
+  unsigned size;
 
   map<K, typename list<pair<K, VPtr> >::iterator > contents;
   list<pair<K, VPtr> > lru;
@@ -36,23 +238,29 @@ class SharedLRU {
   map<K, WeakVPtr> weak_refs;
 
   void trim_cache(list<VPtr> *to_release) {
-    while (lru.size() > max_size) {
+    while (size > max_size) {
       to_release->push_back(lru.back().second);
       lru_remove(lru.back().first);
     }
   }
 
   void lru_remove(K key) {
-    if (!contents.count(key))
+    typename map<K, typename list<pair<K, VPtr> >::iterator>::iterator i =
+      contents.find(key);
+    if (i == contents.end())
       return;
-    lru.erase(contents[key]);
-    contents.erase(key);
+    lru.erase(i->second);
+    --size;
+    contents.erase(i);
   }
 
   void lru_add(K key, VPtr val, list<VPtr> *to_release) {
-    if (contents.count(key)) {
-      lru.splice(lru.begin(), lru, contents[key]);
+    typename map<K, typename list<pair<K, VPtr> >::iterator>::iterator i =
+      contents.find(key);
+    if (i != contents.end()) {
+      lru.splice(lru.begin(), lru, i->second);
     } else {
+      ++size;
       lru.push_front(make_pair(key, val));
       contents[key] = lru.begin();
       trim_cache(to_release);
@@ -77,7 +285,8 @@ class SharedLRU {
   };
 
 public:
-  SharedLRU(size_t max_size = 20) : lock("SharedLRU::lock"), max_size(max_size) {}
+  SharedLRU(size_t max_size = 20)
+    : lock("SharedLRU::lock"), max_size(max_size), size(0) {}
   
   ~SharedLRU() {
     contents.clear();

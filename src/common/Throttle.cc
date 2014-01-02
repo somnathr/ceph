@@ -101,9 +101,9 @@ bool Throttle::_wait(int64_t c)
 
     if (waited) {
       ldout(cct, 3) << "_wait finished waiting" << dendl;
-      utime_t dur = ceph_clock_now(cct) - start;
+      /*utime_t dur = ceph_clock_now(cct) - start;
       if (logger)
-        logger->tinc(l_throttle_wait, dur);
+        logger->tinc(l_throttle_wait, dur);*/
     }
 
     delete cv;
@@ -135,11 +135,11 @@ int64_t Throttle::take(int64_t c)
     Mutex::Locker l(lock);
     count.add(c);
   }
-  if (logger) {
+  /*if (logger) {
     logger->inc(l_throttle_take);
     logger->inc(l_throttle_take_sum, c);
     logger->set(l_throttle_val, count.read());
-  }
+  }*/
   return count.read();
 }
 
@@ -157,11 +157,11 @@ bool Throttle::get(int64_t c, int64_t m)
     waited = _wait(c);
     count.add(c);
   }
-  if (logger) {
+  /*if (logger) {
     logger->inc(l_throttle_get);
     logger->inc(l_throttle_get_sum, c);
     logger->set(l_throttle_val, count.read());
-  }
+  }*/
   return waited;
 }
 
@@ -174,26 +174,26 @@ bool Throttle::get_or_fail(int64_t c)
   Mutex::Locker l(lock);
   if (_should_wait(c) || !cond.empty()) {
     ldout(cct, 10) << "get_or_fail " << c << " failed" << dendl;
-    if (logger) {
+    /*if (logger) {
       logger->inc(l_throttle_get_or_fail_fail);
-    }
+    }*/
     return false;
   } else {
     ldout(cct, 10) << "get_or_fail " << c << " success (" << count.read() << " -> " << (count.read() + c) << ")" << dendl;
     count.add(c);
-    if (logger) {
+    /*if (logger) {
       logger->inc(l_throttle_get_or_fail_success);
       logger->inc(l_throttle_get);
       logger->inc(l_throttle_get_sum, c);
       logger->set(l_throttle_val, count.read());
-    }
+    }*/
     return true;
   }
 }
 
 int64_t Throttle::put(int64_t c)
 {
-  assert(c >= 0);
+  //assert(c >= 0);
   ldout(cct, 10) << "put " << c << " (" << count.read() << " -> " << (count.read()-c) << ")" << dendl;
   Mutex::Locker l(lock);
   if (c) {
@@ -201,11 +201,11 @@ int64_t Throttle::put(int64_t c)
       cond.front()->SignalOne();
     assert(((int64_t)count.read()) >= c); //if count goes negative, we failed somewhere!
     count.sub(c);
-    if (logger) {
+    /*if (logger) {
       logger->inc(l_throttle_put);
       logger->inc(l_throttle_put_sum, c);
       logger->set(l_throttle_val, count.read());
-    }
+    }*/
   }
   return count.read();
 }

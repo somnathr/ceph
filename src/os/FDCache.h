@@ -49,7 +49,10 @@ public:
   };
 
 private:
-  SharedLRU<ghobject_t, FD> registry;
+  //SharedLRU<ghobject_t, FD> registry;
+  //SharedLRUUnordered<ghobject_t, FD> registry;
+   SharedUnorderedCache<ghobject_t, FD> registry;
+  //hash_map<ghobject_t, FDRef> registry;
   CephContext *cct;
 
 public:
@@ -63,18 +66,22 @@ public:
   }
   typedef std::tr1::shared_ptr<FD> FDRef;
 
-  FDRef lookup(const ghobject_t &hoid) {
-    return registry.lookup(hoid);
+  int lookup(const ghobject_t &hoid, FDRef& val) {
+
+    return registry.lookup(hoid, val);
   }
 
-  FDRef add(const ghobject_t &hoid, int fd) {
-    return registry.add(hoid, new FD(fd));
+  int add(const ghobject_t &hoid, FDRef& val) {
+    return registry.add(hoid, val);
+    //return registry.add(hoid.hobj.hash, new FD(fd));
   }
 
   /// clear cached fd for hoid, subsequent lookups will get an empty FD
   void clear(const ghobject_t &hoid) {
     registry.clear(hoid);
-    assert(!registry.lookup(hoid));
+    //registry.clear(hoid.hobj.hash);
+    //assert(!registry.lookup(hoid));
+    //assert(!registry.lookup(hoid.hobj.hash));
   }
 
   /// md_config_obs_t

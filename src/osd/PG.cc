@@ -180,6 +180,9 @@ PG::PG(OSDService *o, OSDMapRef curmap,
   finish_sync_event(NULL),
   scrub_after_recovery(false),
   active_pushes(0),
+  /*op_tp(cct, "PG::op_tp", 16, "pg_op_threads"),
+  op_wq(this, g_conf->filestore_op_thread_timeout,
+	g_conf->filestore_op_thread_suicide_timeout, &op_tp),  */
   recovery_state(this)
 {
 #ifdef PG_DEBUG_REFS
@@ -1329,7 +1332,7 @@ void PG::do_pending_flush()
   }
 }
 
-bool PG::op_has_sufficient_caps(OpRequestRef op)
+bool PG::op_has_sufficient_caps(const OpRequestRef& op)
 {
   // only check MOSDOp
   if (op->get_req()->get_type() != CEPH_MSG_OSD_OP)
@@ -1383,19 +1386,134 @@ void PG::take_op_map_waiters()
   }
 }
 
-void PG::queue_op(OpRequestRef op)
+/*void PG::_do_op(OpRequestRef *op, ThreadPool::TPHandle &handle)
+{
+	lock();
+	do_request_op_fast(opReq);
+	unlock();
+}*/
+#if 0
+bool PG::do_op_fast(OpRequestRef opReq)
+{
+  MOSDOp *mOsd = static_cast<MOSDOp*>(opReq->get_req());
+  if (mOsd->get_type() == CEPH_MSG_OSD_OP)
+  {
+        //dout(10) << "Got an OSD op ..." << dendl;
+        //MOSDOp *mOsd = static_cast<MOSDOp*>(m);
+        bool is_osd_op_read = false;
+        //uint64_t data_off = 0;
+        for (vector<OSDOp>::iterator p = mOsd->ops.begin(); p != mOsd->ops.end(); ++p)
+        {
+                OSDOp& osd_op = *p;
+                ceph_osd_op& op = osd_op.op;
+                switch (op.op)
+                {
+
+                        // --- READS ---
+
+                        case CEPH_OSD_OP_READ:
+                        {
+                                //dout(10) << "Got OSD read for object = " << mOsd->get_oid().name.c_str() << dendl;
+                                //if (NULL != strstr(mOsd->get_oid().name.c_str(),"benchmark_data_ubuntu-ceph"))
+                                /*{
+                                        dout(10) << "It's a test bench object, return dummy.." <<dendl;
+                                        bufferlist bl;
+                                        char bufDummy[4096] ={0};
+                                        uint64_t dummyLength = 4096;
+                                        //snprintf(bufDummy, "I'm the %16dth object!", current_index);
+                                        strcpy(bufDummy, "Ha ha hehe, where is the bottle neck ??? !!!");
+                                        bufferptr bptr(bufDummy, dummyLength);
+                                        bl.push_back(bptr);
+                                        osd_op.outdata.claim_append(bl);
+                                        op.extent.length = dummyLength;
+                                        data_off = op.extent.offset;
+                                        is_osd_op_read = true;
+
+                                }*/
+				
+				/*lock();
+				do_request_op_fast(opReq);
+				unlock();*/
+				is_osd_op_read = true;
+                                break;
+
+                        }
+                        default:
+                                dout(10) << "Dummy test::unhandled op = " << op.op << dendl;
+                                break;
+                }
+        }
+
+        if (is_osd_op_read)
+        {
+                /*MOSDOpReply *reply = new MOSDOpReply(mOsd, 0, get_osdmap()->get_epoch(), 0);
+                reply->claim_op_out_data(mOsd->ops);
+                reply->get_header().data_off = data_off;
+                reply->set_result(0);
+                reply->add_flags(CEPH_OSD_FLAG_ACK | CEPH_OSD_FLAG_ONDISK);
+                //reply->set_version(mOsd->get_version());
+                client_messenger->send_message(reply, mOsd->get_connection());
+                //send_message_osd_client(reply, mOsd->get_connection());*/
+                return true;
+        }
+  }
+
+  return false;
+
+}
+#endif
+
+bool PG::do_op_fast(OpRequestRef opReq)
+{
+  /*if (op->get_req()->get_type() == CEPH_MSG_OSD_OP)
+  {
+	return true;
+  }*/
+  
+  return false;
+  //MOSDOp *mOsd = static_cast<MOSDOp*>(opReq->get_req());
+  /*switch (op->get_req()->get_type()) 
+  {
+    	case CEPH_MSG_OSD_OP:
+    	case MSG_OSD_SUBOP:
+    	case MSG_OSD_SUBOPREPLY:
+    	case MSG_OSD_PG_PUSH:
+    	case MSG_OSD_PG_PULL:
+    	case MSG_OSD_PG_PUSH_REPLY:
+    	case MSG_OSD_PG_SCAN:
+    	case MSG_OSD_PG_BACKFILL:
+		printf("Op Type = %u\n", op->get_req()->get_type());
+      		return true;
+    	default:
+      		return false;
+  }*/
+}
+
+int PG::queue_op(const OpRequestRef& op)
 {
   Mutex::Locker l(map_lock);
+  /*if ((op->get_req()->get_type() == CEPH_MSG_OSD_OP) && (!op->may_write()))
+  {
+	OSDMapRef osdmap = get_osdmap_with_maplock();
+	
+	
+  }*/
   if (!waiting_for_map.empty()) {
     // preserve ordering
     waiting_for_map.push_back(op);
-    return;
+    return 1;
   }
   if (op_must_wait_for_map(get_osdmap_with_maplock(), op)) {
     waiting_for_map.push_back(op);
-    return;
+    return 1;
+  }
+  if (op->get_req()->get_type() == CEPH_MSG_OSD_OP)
+  {
+	return 0;
   }
   osd->op_wq.queue(make_pair(PGRef(this), op));
+  return 0;
+  
 }
 
 void PG::replay_queued_ops()
@@ -2399,13 +2517,7 @@ void PG::log_weirdness()
 		      << " != info.last_update " << info.last_update
 		      << "\n";
 
-  if (pg_log.get_log().empty()) {
-    // shoudl it be?
-    if (pg_log.get_head() != pg_log.get_tail())
-      osd->clog.error() << info.pgid
-			<< " log bound mismatch, empty but (" << pg_log.get_tail() << ","
-			<< pg_log.get_head() << "]\n";
-  } else {
+  if (!pg_log.get_log().empty()) {
     // sloppy check
     if ((pg_log.get_log().log.begin()->version <= pg_log.get_tail()))
       osd->clog.error() << info.pgid
@@ -4679,19 +4791,11 @@ ostream& operator<<(ostream& out, const PG& pg)
       pg.pg_log.get_head() != pg.info.last_update)
     out << " (info mismatch, " << pg.pg_log.get_log() << ")";
 
-  if (pg.pg_log.get_log().empty()) {
-    // shoudl it be?
-    if (pg.pg_log.get_head().version - pg.pg_log.get_tail().version != 0) {
-      out << " (log bound mismatch, empty)";
-    }
-  } else {
-    if ((pg.pg_log.get_log().log.begin()->version <= pg.pg_log.get_tail()) || // sloppy check
-        (pg.pg_log.get_log().log.rbegin()->version != pg.pg_log.get_head() &&
-	 !(pg.pg_log.get_head() == pg.pg_log.get_tail()))) {
+  if (!pg.pg_log.get_log().empty()) {
+    if ((pg.pg_log.get_log().log.begin()->version <= pg.pg_log.get_tail())) {
       out << " (log bound mismatch, actual=["
 	  << pg.pg_log.get_log().log.begin()->version << ","
 	  << pg.pg_log.get_log().log.rbegin()->version << "]";
-      //out << "len=" << pg.log.log.size();
       out << ")";
     }
   }
@@ -4735,7 +4839,7 @@ ostream& operator<<(ostream& out, const PG& pg)
   return out;
 }
 
-bool PG::can_discard_op(OpRequestRef op)
+bool PG::can_discard_op(const OpRequestRef& op)
 {
   MOSDOp *m = static_cast<MOSDOp*>(op->get_req());
   if (OSD::op_is_discardable(m)) {
@@ -4805,7 +4909,7 @@ bool PG::can_discard_backfill(OpRequestRef op)
 
 }
 
-bool PG::can_discard_request(OpRequestRef op)
+bool PG::can_discard_request(const OpRequestRef& op)
 {
   switch (op->get_req()->get_type()) {
   case CEPH_MSG_OSD_OP:
@@ -5121,6 +5225,7 @@ PG::RecoveryState::Started::react(const FlushedEvt&)
 {
   PG *pg = context< RecoveryMachine >().pg;
   pg->flushed = true;
+  pg->on_flushed();
   pg->requeue_ops(pg->waiting_for_active);
   return discard_event();
 }
@@ -6853,6 +6958,7 @@ PG::RecoveryState::WaitFlushedPeering::react(const FlushedEvt &evt)
   PG *pg = context< RecoveryMachine >().pg;
   pg->flushed = true;
   pg->requeue_ops(pg->waiting_for_active);
+  pg->on_flushed();
   return transit< WaitFlushedPeering >();
 }
 

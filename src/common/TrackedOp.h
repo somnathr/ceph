@@ -111,10 +111,10 @@ public:
     typename T::Ref retval(new T(ref, this),
 			   RemoveOnDelete(this));
     
-    _mark_event(retval.get(), "header_read", ref->get_recv_stamp());
-    _mark_event(retval.get(), "throttled", ref->get_throttle_stamp());
-    _mark_event(retval.get(), "all_read", ref->get_recv_complete_stamp());
-    _mark_event(retval.get(), "dispatched", ref->get_dispatch_stamp());
+    //_mark_event(retval.get(), "header_read", ref->get_recv_stamp());
+    //_mark_event(retval.get(), "throttled", ref->get_throttle_stamp());
+    //_mark_event(retval.get(), "all_read", ref->get_recv_complete_stamp());
+    //_mark_event(retval.get(), "dispatched", ref->get_dispatch_stamp());
     
     retval->init_from_message();
     
@@ -146,7 +146,7 @@ protected:
     seq(0),
     warn_interval_multiplier(1)
   {
-    tracker->register_inflight_op(&xitem);
+    //tracker->register_inflight_op(&xitem);
   }
 
   virtual void init_from_message() {}

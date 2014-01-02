@@ -83,10 +83,12 @@ unsigned ceph_str_hash_rjenkins(const char *str, unsigned length)
 unsigned ceph_str_hash_linux(const char *str, unsigned length)
 {
 	unsigned long hash = 0;
+	//unsigned long hash = 2166136261UL;
 
 	while (length--) {
 		unsigned char c = *str++;
 		hash = (hash + (c << 4) + (c >> 4)) * 11;
+		//hash = (hash * 16777619) ^ c ;
 	}
 	return hash;
 }

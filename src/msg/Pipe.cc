@@ -641,9 +641,6 @@ int Pipe::accept()
   session_security = get_auth_session_handler(msgr->cct, connect.authorizer_protocol, session_key,
 					      connection_state->get_features());
 
-  // notify
-  msgr->dispatch_queue.queue_accept(connection_state.get());
-
   // ok!
   if (msgr->dispatch_queue.stop)
     goto shutting_down;
@@ -652,6 +649,9 @@ int Pipe::accept()
   register_pipe();
   msgr->lock.Unlock();
   pipe_lock.Unlock();
+
+  // notify
+  msgr->ms_deliver_handle_accept(connection_state.get());
 
   r = tcp_write((char*)&reply, sizeof(reply));
   if (r < 0) {
@@ -1077,7 +1077,9 @@ int Pipe::connect()
 	session_security = NULL;
       }
 
-      msgr->dispatch_queue.queue_connect(connection_state.get());
+      pipe_lock.Unlock();
+      msgr->ms_deliver_handle_connect(connection_state.get());
+      pipe_lock.Lock();
       
       if (!reader_running) {
 	ldout(msgr->cct,20) << "connect starting reader" << dendl;
@@ -1448,12 +1450,13 @@ void Pipe::reader()
       // note last received message.
       in_seq = m->get_seq();
 
-      cond.Signal();  // wake up writer, to ack this
+      cond.SignalOne();  // wake up writer, to ack this
       
       ldout(msgr->cct,10) << "reader got message "
 	       << m->get_seq() << " " << m << " " << *m
 	       << dendl;
 
+      pipe_lock.Unlock();
       if (delay_thread) {
 	utime_t release;
 	if (rand() % 10000 < msgr->cct->_conf->ms_inject_delay_probability * 10000.0) {
@@ -1465,6 +1468,7 @@ void Pipe::reader()
       } else {
 	in_q->enqueue(m, m->get_priority(), conn_id);
       }
+      pipe_lock.Lock();
     } 
     
     else if (tag == CEPH_MSGR_TAG_CLOSE) {
@@ -1598,7 +1602,7 @@ void Pipe::writer()
 	// security set up.  Some session security options do not
 	// actually calculate and check the signature, but they should
 	// handle the calls to sign_message and check_signature.  PLR
-	if (session_security == NULL) {
+	/*if (session_security == NULL) {
 	  ldout(msgr->cct, 20) << "writer no session security" << dendl;
 	} else {
 	  if (session_security->sign_message(m)) {
@@ -1608,9 +1612,9 @@ void Pipe::writer()
 	    ldout(msgr->cct, 20) << "writer signed seq # " << header.seq
 				 << "): sig = " << footer.sig << dendl;
 	  }
-	}
+	}*/
 
-	bufferlist blist = m->get_payload();
+	bufferlist& blist = m->get_payload();
 	blist.append(m->get_middle());
 	blist.append(m->get_data());
 
@@ -1730,30 +1734,30 @@ int Pipe::read_message(Message **pm)
   Message *message;
   utime_t recv_stamp = ceph_clock_now(msgr->cct);
 
-  if (policy.throttler_messages) {
+  /*if (policy.throttler_messages) {
     ldout(msgr->cct,10) << "reader wants " << 1 << " message from policy throttler "
 			<< policy.throttler_messages->get_current() << "/"
 			<< policy.throttler_messages->get_max() << dendl;
     policy.throttler_messages->get();
-  }
+  }*/
 
   uint64_t message_size = header.front_len + header.middle_len + header.data_len;
   if (message_size) {
-    if (policy.throttler_bytes) {
+    /*if (policy.throttler_bytes) {
       ldout(msgr->cct,10) << "reader wants " << message_size << " bytes from policy throttler "
 	       << policy.throttler_bytes->get_current() << "/"
 	       << policy.throttler_bytes->get_max() << dendl;
       policy.throttler_bytes->get(message_size);
-    }
+    }*/
 
     // throttle total bytes waiting for dispatch.  do this _after_ the
     // policy throttle, as this one does not deadlock (unless dispatch
     // blocks indefinitely, which it shouldn't).  in contrast, the
     // policy throttle carries for the lifetime of the message.
-    ldout(msgr->cct,10) << "reader wants " << message_size << " from dispatch throttler "
+   /* ldout(msgr->cct,10) << "reader wants " << message_size << " from dispatch throttler "
 	     << msgr->dispatch_throttler.get_current() << "/"
 	     << msgr->dispatch_throttler.get_max() << dendl;
-    msgr->dispatch_throttler.get(message_size);
+    msgr->dispatch_throttler.get(message_size);*/
   }
 
   utime_t throttle_stamp = ceph_clock_now(msgr->cct);
@@ -1872,7 +1876,7 @@ int Pipe::read_message(Message **pm)
   //  Check the signature if one should be present.  A zero return indicates success. PLR
   //
 
-  if (session_security == NULL) {
+  /*if (session_security == NULL) {
     ldout(msgr->cct, 10) << "No session security set" << dendl;
   } else {
     if (session_security->check_message_signature(message)) {
@@ -1880,14 +1884,14 @@ int Pipe::read_message(Message **pm)
       ret = -EINVAL;
       goto out_dethrottle;
     } 
-  }
+  }*/
 
-  message->set_byte_throttler(policy.throttler_bytes);
-  message->set_message_throttler(policy.throttler_messages);
+  //message->set_byte_throttler(policy.throttler_bytes);
+  //message->set_message_throttler(policy.throttler_messages);
 
   // store reservation size in message, so we don't get confused
   // by messages entering the dispatch queue through other paths.
-  message->set_dispatch_throttle_size(message_size);
+  //message->set_dispatch_throttle_size(message_size);
 
   message->set_recv_stamp(recv_stamp);
   message->set_throttle_stamp(throttle_stamp);
@@ -1898,21 +1902,21 @@ int Pipe::read_message(Message **pm)
 
  out_dethrottle:
   // release bytes reserved from the throttlers on failure
-  if (policy.throttler_messages) {
+  /*if (policy.throttler_messages) {
     ldout(msgr->cct,10) << "reader releasing " << 1 << " message to policy throttler "
 			<< policy.throttler_messages->get_current() << "/"
 			<< policy.throttler_messages->get_max() << dendl;
     policy.throttler_messages->put();
-  }
+  }*/
   if (message_size) {
-    if (policy.throttler_bytes) {
+    /*if (policy.throttler_bytes) {
       ldout(msgr->cct,10) << "reader releasing " << message_size << " bytes to policy throttler "
 			  << policy.throttler_bytes->get_current() << "/"
 			  << policy.throttler_bytes->get_max() << dendl;
       policy.throttler_bytes->put(message_size);
-    }
+    }*/
 
-    msgr->dispatch_throttle_release(message_size);
+    //msgr->dispatch_throttle_release(message_size);
   }
   return ret;
 }
