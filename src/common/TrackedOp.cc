@@ -232,9 +232,12 @@ void OpTracker::_mark_event(TrackedOp *op, const string &evt,
 }
 
 void OpTracker::RemoveOnDelete::operator()(TrackedOp *op) {
-  op->mark_event("done");
-  tracker->unregister_inflight_op(op);
+  //op->mark_event("done");
+  //tracker->unregister_inflight_op(op);
   // Do not delete op, unregister_inflight_op took control
+  op->xitem.remove_myself();
+  op->request->clear_data();
+  delete op;
 }
 
 void TrackedOp::mark_event(const string &event)
