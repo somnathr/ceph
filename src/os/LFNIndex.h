@@ -72,7 +72,8 @@
   return -1;					\
   }						\
 
-  
+ 
+#define LFN_ATTR_HOBJ_POOL "user.cephos.lfn3" 
 
 class LFNIndex : public CollectionIndex {
   /// Hash digest output size.
@@ -91,6 +92,7 @@ class LFNIndex : public CollectionIndex {
   static const string FILENAME_COOKIE;
   /// Name of LFN attribute for storing full name.
   static const string LFN_ATTR;
+
   /// Prefix for subdir index attributes.
   static const string PHASH_ATTR_PREFIX;
   /// Prefix for index subdirectories.
@@ -122,6 +124,11 @@ protected:
     error_injection_enabled = false;
   }
 
+  int lfn_get_name(const ghobject_t &oid, string& full_path);
+  int lfn_generate_object_name(const ghobject_t &oid, string& full_name);
+  int lfn_generate_object_name_keyless(const ghobject_t &oid, string& full_name);
+  int lfn_generate_object_name_poolless(const ghobject_t &oid, string& full_name); 
+
 private:
   string lfn_attribute;
   coll_t collection;
@@ -139,13 +146,29 @@ public:
       error_injection_on(_error_injection_probability != 0),
       error_injection_probability(_error_injection_probability),
       last_failure(0), current_failure(0),
-      collection(collection) {
-    if (index_version == HASH_INDEX_TAG) {
+      //collection(collection), ((index_version == HOBJECT_WITH_POOL) ? lfn_attribute(LFN_ATTR_HOBJ_POOL): (index_version == HOBJECT_WITH_POOL)? lfn_attribute(LFN_ATTR) : lfn_attribute())
+      lfn_attribute((index_version == HOBJECT_WITH_POOL) ? LFN_ATTR_HOBJ_POOL : (index_version == HOBJECT_WITH_POOL)? LFN_ATTR : ""), collection(collection)
+  {
+    /*if (index_version == HASH_INDEX_TAG) {
       lfn_attribute = LFN_ATTR;
-    } else {
+    }
+    else if (index_version == HOBJECT_WITH_POOL) {
+	lfn_attribute = LFN_ATTR + string("3");	
+    }
+    else {
       char buf[100];
       snprintf(buf, sizeof(buf), "%d", index_version);
       lfn_attribute = LFN_ATTR + string(buf);
+    }*/
+
+    if (lfn_attribute.empty())
+    {
+	if ((index_version != HASH_INDEX_TAG) && (index_version != HOBJECT_WITH_POOL))
+	{
+		char buf[100];
+		snprintf(buf, sizeof(buf), "%d", index_version);
+		lfn_attribute = LFN_ATTR + string(buf);
+	}
     }
   }
 
@@ -180,6 +203,8 @@ public:
     IndexedPath *path,
     int *exist
     );
+
+  int fast_lookup(const ghobject_t &oid, int flags, string& full_path);
 
   /// @see CollectionIndex
   int collection_list(
@@ -231,6 +256,8 @@ protected:
     const ghobject_t &oid,          ///< [in] Object to remove.
     const string &mangled_name	    ///< [in] Mangled filename.
     ) = 0;
+
+   virtual int _lookup(const ghobject_t &oid, string& full_path) = 0;
 
   /// Return the path and mangled_name for oid.
   virtual int _lookup(
@@ -414,6 +441,9 @@ protected:
     const string &attr_name	///< [in] attr to remove
     ); ///< @return Error code, 0 on success
 
+  const string &get_base_path();
+
+
 private:
   /* lfn translation functions */
 
@@ -527,7 +557,7 @@ private:
 
   /* other common methods */
   /// Gets the base path
-  const string &get_base_path(); ///< @return Index base_path
+  //const string &get_base_path(); ///< @return Index base_path
 
   /// Get full path the subdir
   string get_full_path_subdir(
