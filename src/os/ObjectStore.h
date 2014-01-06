@@ -499,7 +499,7 @@ public:
       ops++;
     }
     void rmattrs(coll_t cid, const ghobject_t& oid) {
-      __u32 op = OP_RMATTR;
+      __u32 op = OP_RMATTRS;
       ::encode(op, tbl);
       ::encode(cid, tbl);
       ::encode(oid, tbl);
@@ -894,9 +894,18 @@ public:
     bufferlist& bl,
     bool allow_eio = false) = 0;
 
+  virtual int read_fast(
+    coll_t cid,
+    const ghobject_t& oid,
+    uint64_t offset,
+    size_t len,
+    bufferlist& bl,
+    int& fd, string& fullPath) = 0;
+
   virtual int fiemap(coll_t cid, const ghobject_t& oid, uint64_t offset, size_t len, bufferlist& bl) = 0;
 
   virtual int getattr(coll_t cid, const ghobject_t& oid, const char *name, bufferptr& value) = 0;
+  virtual int getattr_fast(coll_t cid, const ghobject_t& oid, const char *name, bufferptr& value, int& fd, string& fullPath) = 0;
   int getattr(coll_t cid, const ghobject_t& oid, const char *name, bufferlist& value) {
     bufferptr bp;
     int r = getattr(cid, oid, name, bp);
@@ -904,7 +913,26 @@ public:
       value.push_back(bp);
     return r;
   }
+
+  int getattr_fast(coll_t cid, const ghobject_t& oid, const char *name, bufferlist& value, int& fd, string& fullPath) {
+    bufferptr bp;
+    int r = getattr_fast(cid, oid, name, bp, fd, fullPath);
+    if (bp.length())
+      value.push_back(bp);
+    return r;
+  }
+
   virtual int getattrs(coll_t cid, const ghobject_t& oid, map<string,bufferptr>& aset, bool user_only = false) {return 0;};
+  int getattrs(coll_t cid, const ghobject_t& oid, map<string,bufferlist>& aset, bool user_only = false) {
+    map<string,bufferptr> bmap;
+    int r = getattrs(cid, oid, bmap, user_only);
+    for (map<string,bufferptr>::iterator i = bmap.begin();
+	i != bmap.end();
+	++i) {
+      aset[i->first].append(i->second);
+    }
+    return r;
+  }
 
    
   // collections

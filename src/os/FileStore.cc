@@ -121,14 +121,68 @@ ostream& operator<<(ostream& out, const FileStore::OpSequencer& s)
   assert(&out);
   return out << *s.parent;
 }
+#if 0
+int FileStore::get_cdir(const coll_t& cid, char *s, int len) 
+{
+  /*const string &cid_str(cid.to_str());
+  snprintf(s, len, "%s/current/%s", basedir.c_str(), cid_str.c_str());
 
-int FileStore::get_cdir(coll_t cid, char *s, int len) 
+  //printf("### cdir_map hit, %s = %s\n", cid.to_str().c_str(), s);
+  return 0;*/
+
+  std::map<string, string>::iterator it = cdir_map.find(cid.to_str());
+
+  if (it == cdir_map.end())
+  {
+	snprintf(s, len, "%s/current/%s", basedir.c_str(), cid.to_str().c_str());
+	cdir_map.insert(std::pair<string, string>(cid.to_str(), string(s, len)));
+  }
+  else
+  {
+	//s = (char*) (it->second).c_str();
+	memcpy(s, (it->second).c_str(), len);
+	//printf("### cdir_map hit, %s = %s\n", cid.to_str().c_str(), s);
+  }
+
+  return 0;
+  
+}
+#else
+
+int FileStore::get_cdir(const coll_t& cid, char *s, int len) 
 {
   const string &cid_str(cid.to_str());
   return snprintf(s, len, "%s/current/%s", basedir.c_str(), cid_str.c_str());
 }
+#endif
 
-int FileStore::get_index(coll_t cid, Index *index)
+#if 0
+int FileStore::get_index(coll_t& cid, Index *index)
+{
+  char path[PATH_MAX];
+  int r = 0;
+
+  std::map<string, string>::iterator it = cdir_map.find(cid.to_str());
+
+  if (it == cdir_map.end())
+  {
+	get_cdir(cid, path, sizeof(path));
+	r = index_manager.get_index(cid, path, index);
+  }
+  else
+  {
+	//s = (char*) (it->second).c_str();
+	r = index_manager.get_index(cid, (it->second).c_str(), index);
+  }
+
+  //get_cdir(cid, path, sizeof(path));
+  //int r = index_manager.get_index(cid, path, index);
+  assert(!m_filestore_fail_eio || r != -EIO);
+  return r;
+}
+
+#else
+int FileStore::get_index(coll_t& cid, Index *index)
 {
   char path[PATH_MAX];
   get_cdir(cid, path, sizeof(path));
@@ -136,6 +190,7 @@ int FileStore::get_index(coll_t cid, Index *index)
   assert(!m_filestore_fail_eio || r != -EIO);
   return r;
 }
+#endif
 
 int FileStore::init_index(coll_t cid)
 {
@@ -194,7 +249,69 @@ int FileStore::lfn_stat(coll_t cid, const ghobject_t& oid, struct stat *buf)
   return r;
 }
 
-int FileStore::lfn_open(coll_t cid,
+int FileStore::lfn_open_fast(coll_t& cid,
+                        const ghobject_t& oid,
+                        int& outfd, string& fullPath)
+{
+
+  int flags = O_RDWR;
+
+  int r;
+  if (!index_manager.isUpgrade())
+  {
+        r = index_manager.get_fd_fast(cid, oid, basedir, flags, outfd, &fullPath);
+
+        if (r < 0) {
+                dout(10) << "error getting collection index for " << cid
+                        << ": " << cpp_strerror(-r) << dendl;
+        goto fail;
+        }
+
+        //fd = r;
+  }
+  else
+  {
+	Index index;
+
+        r = get_index(cid, &index);
+
+        int exist;
+
+        {
+                IndexedPath path;
+                if (r < 0) {
+                        derr << "error getting collection index for " << cid
+                                << ": " << cpp_strerror(-r) << dendl;
+                        goto fail;
+                }
+                r = index->lookup(oid, &path, &exist);
+                if (r < 0) {
+                        derr << "could not find " << oid << " in index: "
+                                << cpp_strerror(-r) << dendl;
+                        goto fail;
+                }
+
+                r = ::open(path->path(), flags, 0644);
+                if (r < 0) {
+                        r = -errno;
+                        dout(10) << "error opening file " << path->path() << " with flags="
+                                << flags << ": " << cpp_strerror(-r) << dendl;
+                        goto fail;
+                }
+                outfd = r;
+
+        }
+   }
+
+  return 0;
+
+ fail:
+  assert(!m_filestore_fail_eio || r != -EIO);
+  return r;
+}
+
+
+int FileStore::lfn_open(coll_t& cid,
 			const ghobject_t& oid,
 			bool create,
 			FDRef *outfd,
@@ -216,55 +333,73 @@ int FileStore::lfn_open(coll_t cid,
   if (!(*index)) {
     r = get_index(cid, index);
   }
-  Mutex::Locker l(fdcache_lock);
-  if (!replaying)
-    *outfd = fdcache.lookup(oid);
-  if (*outfd) {
-    return 0;
-  }
-  IndexedPath path2;
-  if (!path)
-    path = &path2;
+
   int fd, exist;
-  if (r < 0) {
-    derr << "error getting collection index for " << cid
-	 << ": " << cpp_strerror(-r) << dendl;
-    goto fail;
-  }
-  r = (*index)->lookup(oid, path, &exist);
-  if (r < 0) {
-    derr << "could not find " << oid << " in index: "
-	 << cpp_strerror(-r) << dendl;
-    goto fail;
+  if (!replaying) {
+    Mutex::Locker l(fdcache_lock);
+    *outfd = fdcache.lookup(oid);
+    if (*outfd)
+      return 0;
   }
 
-  r = ::open((*path)->path(), flags, 0644);
-  if (r < 0) {
-    r = -errno;
-    dout(10) << "error opening file " << (*path)->path() << " with flags="
-	     << flags << ": " << cpp_strerror(-r) << dendl;
-    goto fail;
-  }
-  fd = r;
-
-  if (create && (!exist)) {
-    r = (*index)->created(oid, (*path)->path());
+  {
+    IndexedPath path2;
+    if (!path)
+      path = &path2;
     if (r < 0) {
-      TEMP_FAILURE_RETRY(::close(fd));
-      derr << "error creating " << oid << " (" << (*path)->path()
-	   << ") in index: " << cpp_strerror(-r) << dendl;
+      derr << "error getting collection index for " << cid
+	   << ": " << cpp_strerror(-r) << dendl;
       goto fail;
     }
+    r = (*index)->lookup(oid, path, &exist);
+    if (r < 0) {
+      derr << "could not find " << oid << " in index: "
+	   << cpp_strerror(-r) << dendl;
+      goto fail;
+    }
+
+    r = ::open((*path)->path(), flags, 0644);
+    if (r < 0) {
+      r = -errno;
+      dout(10) << "error opening file " << (*path)->path() << " with flags="
+	       << flags << ": " << cpp_strerror(-r) << dendl;
+      goto fail;
+    }
+    fd = r;
+
+    if (create && (!exist)) {
+      r = (*index)->created(oid, (*path)->path());
+      if (r < 0) {
+	TEMP_FAILURE_RETRY(::close(fd));
+	derr << "error creating " << oid << " (" << (*path)->path()
+	     << ") in index: " << cpp_strerror(-r) << dendl;
+	goto fail;
+      }
+    }
   }
-  if (!replaying)
-    *outfd = fdcache.add(oid, fd);
-  else
+
+  if (!replaying) {
+    Mutex::Locker l(fdcache_lock);
+    *outfd = fdcache.lookup(oid);
+    if (*outfd) {
+      TEMP_FAILURE_RETRY(::close(fd));
+      return 0;
+    } else {
+      *outfd = fdcache.add(oid, fd);
+    }
+  } else {
     *outfd = FDRef(new FDCache::FD(fd));
+  }
   return 0;
 
  fail:
   assert(!m_filestore_fail_eio || r != -EIO);
   return r;
+}
+
+void FileStore::lfn_close_fast(int fd)
+{
+	TEMP_FAILURE_RETRY(::close(fd));
 }
 
 void FileStore::lfn_close(FDRef fd)
@@ -2497,6 +2632,100 @@ int FileStore::stat(
     return r;
   }
 }
+  
+int FileStore::read_fast(
+    coll_t cid,
+    const ghobject_t& oid,
+    uint64_t offset,
+    size_t len,
+    bufferlist& bl,
+    int& fd, string& fullPath)
+{
+  int got = 0;
+
+  dout(15) << "read_fast " << cid << "/" << oid << " " << offset << "~" << len << dendl;
+
+  //printf(" In read_fast\n");
+  //dout(0) << "In read_fast" <<dendl;
+  bufferptr bptr;
+
+  if (fd >= 0)
+  {
+  	if (len == 0) {
+    		struct stat st;
+    		memset(&st, 0, sizeof(struct stat));
+    		int r = ::fstat(fd, &st);
+    		assert(r == 0);
+    		len = st.st_size;
+  	}
+
+	bptr = buffer::create(len);
+  	got = safe_pread(fd, bptr.c_str(), len, offset);
+
+  }
+
+  if (got < 0)
+  {
+	//printf(" In read_fast fd read not successful\n");
+	dout(10)<<" In read_fast fd read not successful\n" << dendl;
+	int flags = O_RDWR;
+    	fd = ::open(fullPath.c_str(), flags, 0644);
+    	if (fd < 0) 
+	{
+		//printf(" In read_fast fullpath read not successful\n");
+		dout(10)<<" In read_fast fullpath read not successful\n"<<dendl;
+  		int r = lfn_open_fast(cid, oid, fd, fullPath);
+  		if (r < 0) 
+		{
+    			return r;	
+  		}
+		
+    	}
+
+        if (len == 0) {
+        	struct stat st;
+                memset(&st, 0, sizeof(struct stat));
+                int r = ::fstat(fd, &st);
+                assert(r == 0);
+                len = st.st_size;
+         }
+
+	 bptr = buffer::create(len);
+         got = safe_pread(fd, bptr.c_str(), len, offset);
+	
+  }
+
+  if (got < 0) {
+    dout(0) << "FileStore::read_fast(" << cid << "/" << oid << ") pread error: " << cpp_strerror(got) << dendl;
+    lfn_close_fast(fd);
+    return got;
+  }
+  bptr.set_length(got);   // properly size the buffer
+  bl.push_back(bptr);   // put it in the target bufferlist
+
+  if (m_filestore_sloppy_crc && (!replaying || backend->can_checkpoint())) {
+    ostringstream ss;
+    int errors = backend->_crc_verify_read(fd, offset, got, bl, &ss);
+    if (errors > 0) {
+      dout(0) << "FileStore::read_fast " << cid << "/" << oid << " " << offset << "~"
+              << got << " ... BAD CRC:\n" << ss.str() << dendl;
+      assert(0 == "bad crc on read");
+    }
+  }
+
+  lfn_close_fast(fd);
+
+  dout(10) << "FileStore::read_fast " << cid << "/" << oid << " " << offset << "~"
+           << got << "/" << len << dendl;
+  if (g_conf->filestore_debug_inject_read_err &&
+      debug_data_eio(oid)) {
+    return -EIO;
+  } else {
+    return got;
+  }
+
+
+}
 
 int FileStore::read(
   coll_t cid,
@@ -3261,8 +3490,9 @@ int FileStore::_fgetattr(int fd, const char *name, bufferptr& bp)
   char val[100];
   int l = chain_fgetxattr(fd, name, val, sizeof(val));
   if (l >= 0) {
-    bp = buffer::create(l);
-    memcpy(bp.c_str(), val, l);
+    /*bp = buffer::create(l);
+    memcpy(bp.c_str(), val, l);*/
+    bp = buffer::copy(val, l);
   } else if (l == -ERANGE) {
     l = chain_fgetxattr(fd, name, 0, 0);
     if (l > 0) {
@@ -3391,6 +3621,61 @@ bool FileStore::debug_mdata_eio(const ghobject_t &oid) {
 
 // objects
 
+int FileStore::getattr_fast(coll_t cid, const ghobject_t& oid, const char *name, bufferptr &bp, int& fd, string& fullPath)
+{
+  dout(15) << "getattr " << cid << "/" << oid << " '" << name << "'" << dendl;
+  
+  int r = lfn_open_fast(cid, oid, fd, fullPath);
+  if (r < 0) {
+    dout(2) << "FileStore::getattr_fast lfn_open_fast failed for " << fullPath <<dendl;
+    goto out;
+  }
+  {
+        //char n[CHAIN_XATTR_MAX_NAME_LEN] = "user.ceph.";
+        //strncat(n,name,CHAIN_XATTR_MAX_NAME_LEN);
+        //get_attrname(name, n, CHAIN_XATTR_MAX_NAME_LEN);
+
+        r = _fgetattr(fd, name, bp);
+  }
+  //lfn_close_fast(fd);
+  if (r == -ENODATA) {
+    dout(0) << "FileStore::getattr_fast _fgetattr failed !!\n" <<dendl;
+    map<string, bufferlist> got;
+    set<string> to_get;
+    //to_get.insert(string(name));
+    to_get.insert(string("_"));
+    /*Index index;
+    r = get_index(cid, &index);
+    if (r < 0) {
+      dout(10) << __func__ << " could not get index r = " << r << dendl;
+      goto out;
+    }*/
+    r = object_map->get_xattrs(oid, to_get, &got);
+    if (r < 0 && r != -ENOENT) {
+      dout(10) << __func__ << " get_xattrs err r =" << r << dendl;
+      goto out;
+    }
+    if (got.empty()) {
+      dout(10) << __func__ << " got.size() is 0" << dendl;
+      return -ENODATA;
+    }
+    bp = bufferptr(got.begin()->second.c_str(),
+                   got.begin()->second.length());
+    r = bp.length();
+  }
+ out:
+  dout(10) << "getattr " << cid << "/" << oid << " '" << name << "' = " << r << dendl;
+  assert(!m_filestore_fail_eio || r != -EIO);
+  if (g_conf->filestore_debug_inject_read_err &&
+      debug_mdata_eio(oid)) {
+    return -EIO;
+  } else {
+
+    return r;
+  }
+
+}
+
 int FileStore::getattr(coll_t cid, const ghobject_t& oid, const char *name, bufferptr &bp)
 {
   dout(15) << "getattr " << cid << "/" << oid << " '" << name << "'" << dendl;
@@ -3399,9 +3684,13 @@ int FileStore::getattr(coll_t cid, const ghobject_t& oid, const char *name, buff
   if (r < 0) {
     goto out;
   }
-  char n[CHAIN_XATTR_MAX_NAME_LEN];
-  get_attrname(name, n, CHAIN_XATTR_MAX_NAME_LEN);
-  r = _fgetattr(**fd, n, bp);
+  {
+  	char n[CHAIN_XATTR_MAX_NAME_LEN] = "user.ceph.";
+  	strncat(n,name,CHAIN_XATTR_MAX_NAME_LEN);
+  	//get_attrname(name, n, CHAIN_XATTR_MAX_NAME_LEN);
+
+  	r = _fgetattr(**fd, n, bp);
+  }
   lfn_close(fd);
   if (r == -ENODATA) {
     map<string, bufferlist> got;
@@ -3424,7 +3713,7 @@ int FileStore::getattr(coll_t cid, const ghobject_t& oid, const char *name, buff
     }
     bp = bufferptr(got.begin()->second.c_str(),
 		   got.begin()->second.length());
-    r = 0;
+    r = bp.length();
   }
  out:
   dout(10) << "getattr " << cid << "/" << oid << " '" << name << "' = " << r << dendl;
@@ -3433,6 +3722,7 @@ int FileStore::getattr(coll_t cid, const ghobject_t& oid, const char *name, buff
       debug_mdata_eio(oid)) {
     return -EIO;
   } else {
+
     return r;
   }
 }
