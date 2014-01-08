@@ -5341,11 +5341,13 @@ ObjectContextRef ReplicatedPG::get_object_context(const hobject_t& soid,
 	obc->obs.fd = fd;
 	obc->obs.fullPath = fullPath;
     }
-
-    /*obc->ssc = get_snapset_context(
-      soid.oid, soid.get_key(), soid.hash,
-      true, soid.get_namespace(),
-      soid.has_snapset() ? attrs : 0);*/
+    else
+    {
+    	obc->ssc = get_snapset_context(
+      		soid.oid, soid.get_key(), soid.hash,
+      		true, soid.get_namespace(),
+      		soid.has_snapset() ? attrs : 0);
+    }
     //register_snapset_context(obc->ssc);
 
     populate_obc_watchers(obc);
