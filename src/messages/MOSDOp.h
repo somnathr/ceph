@@ -58,7 +58,7 @@ public:
   friend class MOSDOpReply;
 
   // read
-  snapid_t& get_snapid() { return snapid; }
+  const snapid_t& get_snapid() { return snapid; }
   void set_snapid(snapid_t s) { snapid = s; }
   // writ
   const snapid_t& get_snap_seq() const { return snap_seq; }

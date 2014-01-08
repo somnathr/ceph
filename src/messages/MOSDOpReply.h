@@ -127,7 +127,6 @@ public:
   MOSDOpReply(MOSDOp *req, int r, epoch_t e, int acktype)
     : Message(CEPH_MSG_OSD_OPREPLY, HEAD_VERSION, COMPAT_VERSION), ops(req->ops) {
     set_tid(req->get_tid());
-    //ops = req->ops;
     result = r;
     flags =
       (req->flags & ~(CEPH_OSD_FLAG_ONDISK|CEPH_OSD_FLAG_ONNVRAM|CEPH_OSD_FLAG_ACK)) | acktype;
