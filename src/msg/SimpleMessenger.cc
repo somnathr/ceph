@@ -432,7 +432,6 @@ void SimpleMessenger::submit_message(Message *m, Connection *con,
   }
 
   // remote, no existing pipe.
-  lock.Lock();
   const Policy& policy = get_policy(dest_type);
   if (policy.server) {
     ldout(cct,20) << "submit_message " << *m << " remote, " << dest_addr << ", lossy server for target type "
@@ -445,7 +444,6 @@ void SimpleMessenger::submit_message(Message *m, Connection *con,
     ldout(cct,20) << "submit_message " << *m << " remote, " << dest_addr << ", new pipe." << dendl;
     connect_rank(dest_addr, dest_type, con, m);
   }
-  lock.Unlock();
 }
 
 int SimpleMessenger::send_keepalive(const entity_inst_t& dest)
