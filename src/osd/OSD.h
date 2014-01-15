@@ -1094,7 +1094,6 @@ private:
       unlock();
     }
     bool _empty() {
-      //Mutex::Locker l(qlock);
       return pqueue.empty();
     }
     void _process(PGRef pg, ThreadPool::TPHandle &handle);

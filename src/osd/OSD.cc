@@ -5041,18 +5041,19 @@ void OSD::ms_fast_dispatch(Message *m)
   OpRequestRef op = op_tracker.create_request<OpRequest>(m);
 
 
-  OSDMapRef nextmap = service.get_osdmap();
+  //OSDMapRef nextmap = service.get_osdmap();
+  OSDMapRef nextmap = service.get_nextmap_reserved();
 
-  dispatch_op_fast(op, nextmap);
-  /*Session *session = static_cast<Session*>(m->get_connection()->get_priv());
+  //dispatch_op_fast(op, nextmap);
+  Session *session = static_cast<Session*>(m->get_connection()->get_priv());
   assert(session);
   {
-    //Mutex::Locker l(session->session_dispatch_lock);
+    Mutex::Locker l(session->session_dispatch_lock);
     session->waiting_on_map.push_back(op);
     dispatch_session_waiting(session, nextmap);
   }
-  session->put();*/
-  //service.release_map(nextmap);
+  session->put();
+  service.release_map(nextmap);
 }
 
 bool OSD::ms_get_authorizer(int dest_type, AuthAuthorizer **authorizer, bool force_new)
@@ -7504,13 +7505,13 @@ void OSD::handle_op(const OpRequestRef& op, const OSDMapRef& osdmap)
 {
   MOSDOp *m = static_cast<MOSDOp*>(op->get_req());
   assert(m->get_header().type == CEPH_MSG_OSD_OP);
-  /*if (op_is_discardable(m)) {
+  if (op_is_discardable(m)) {
     dout(10) << " discardable " << *m << dendl;
     return;
-  }*/
+  }
 
   // we don't need encoded payload anymore
-  //m->clear_payload();
+  m->clear_payload();
 
   // object name too long?
   if (m->get_oid().name.size() > MAX_CEPH_OBJECT_NAME_LEN) {
@@ -7589,12 +7590,12 @@ void OSD::handle_op(const OpRequestRef& op, const OSDMapRef& osdmap)
     pgid = osdmap->raw_pg_to_pg(pgid);
   }
 
-  /*OSDMapRef send_map = service.try_get_map(m->get_map_epoch());
+  OSDMapRef send_map = service.try_get_map(m->get_map_epoch());
   // check send epoch
   if (!send_map) {
     dout(7) << "don't have sender's osdmap; assuming it was valid and that client will resend" << dendl;
     return;
-  }*/
+  }
 
 #if 0
   if (!send_map->have_pg_pool(pgid.pool())) {
@@ -7695,14 +7696,13 @@ void OSD::enqueue_op(PG *pg, const OpRequestRef& op)
   }
 
   if (op->get_req()->get_type() == CEPH_MSG_OSD_OP) 
-  //if (false) 
   {
 
 	MOSDOp *m = static_cast<MOSDOp*>(op->get_req());
 
 
 	uint32_t thread_pool_num = (m->get_pg().ps())% 8 + 1;
-	//dout(0) << "OSD::enqueue_op::pg.ps = " << m->get_pg().ps() << " thread_pool_num = " << thread_pool_num << dendl;
+	dout(20) << "OSD::enqueue_op::pg.ps = " << m->get_pg().ps() << " thread_pool_num = " << thread_pool_num << dendl;
 
   	switch(thread_pool_num)
   	{
