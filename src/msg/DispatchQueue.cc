@@ -49,7 +49,6 @@ uint64_t DispatchQueue::pre_dispatch(Message *m)
 	       << " " << m->get_footer().data_crc << ")"
 	       << " " << m << " con " << m->get_connection()
 	       << dendl;*/
-  m->clear_payload();
   //uint64_t msize = m->get_dispatch_throttle_size();
   //m->set_dispatch_throttle_size(0); // clear it out, in case we requeue this message.
   //return msize;
@@ -66,7 +65,7 @@ void DispatchQueue::post_dispatch(Message *m, uint64_t msize)
 void DispatchQueue::enqueue(Message *m, int priority, uint64_t id)
 {
   if (msgr->ms_can_fast_dispatch(m)) {
-    uint64_t msize = pre_dispatch(m);
+    //uint64_t msize = pre_dispatch(m);
     msgr->ms_fast_dispatch(m);
     //post_dispatch(m, msize);
   } else {
