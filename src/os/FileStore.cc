@@ -121,67 +121,13 @@ ostream& operator<<(ostream& out, const FileStore::OpSequencer& s)
   assert(&out);
   return out << *s.parent;
 }
-#if 0
-int FileStore::get_cdir(const coll_t& cid, char *s, int len) 
-{
-  /*const string &cid_str(cid.to_str());
-  snprintf(s, len, "%s/current/%s", basedir.c_str(), cid_str.c_str());
-
-  //printf("### cdir_map hit, %s = %s\n", cid.to_str().c_str(), s);
-  return 0;*/
-
-  std::map<string, string>::iterator it = cdir_map.find(cid.to_str());
-
-  if (it == cdir_map.end())
-  {
-	snprintf(s, len, "%s/current/%s", basedir.c_str(), cid.to_str().c_str());
-	cdir_map.insert(std::pair<string, string>(cid.to_str(), string(s, len)));
-  }
-  else
-  {
-	//s = (char*) (it->second).c_str();
-	memcpy(s, (it->second).c_str(), len);
-	//printf("### cdir_map hit, %s = %s\n", cid.to_str().c_str(), s);
-  }
-
-  return 0;
-  
-}
-#else
 
 int FileStore::get_cdir(const coll_t& cid, char *s, int len) 
 {
   const string &cid_str(cid.to_str());
   return snprintf(s, len, "%s/current/%s", basedir.c_str(), cid_str.c_str());
 }
-#endif
 
-#if 0
-int FileStore::get_index(coll_t& cid, Index *index)
-{
-  char path[PATH_MAX];
-  int r = 0;
-
-  std::map<string, string>::iterator it = cdir_map.find(cid.to_str());
-
-  if (it == cdir_map.end())
-  {
-	get_cdir(cid, path, sizeof(path));
-	r = index_manager.get_index(cid, path, index);
-  }
-  else
-  {
-	//s = (char*) (it->second).c_str();
-	r = index_manager.get_index(cid, (it->second).c_str(), index);
-  }
-
-  //get_cdir(cid, path, sizeof(path));
-  //int r = index_manager.get_index(cid, path, index);
-  assert(!m_filestore_fail_eio || r != -EIO);
-  return r;
-}
-
-#else
 int FileStore::get_index(coll_t& cid, Index *index)
 {
   char path[PATH_MAX];
@@ -190,7 +136,6 @@ int FileStore::get_index(coll_t& cid, Index *index)
   assert(!m_filestore_fail_eio || r != -EIO);
   return r;
 }
-#endif
 
 int FileStore::init_index(coll_t cid)
 {
@@ -2207,6 +2152,7 @@ unsigned FileStore::_do_transaction(
     int r = 0;
 
     _inject_failure();
+   
 
     switch (op) {
     case Transaction::OP_NOP:
@@ -2645,8 +2591,6 @@ int FileStore::read_fast(
 
   dout(15) << "read_fast " << cid << "/" << oid << " " << offset << "~" << len << dendl;
 
-  //printf(" In read_fast\n");
-  //dout(0) << "In read_fast" <<dendl;
   bufferptr bptr;
 
   if (fd >= 0)
@@ -2666,13 +2610,11 @@ int FileStore::read_fast(
 
   if (got < 0)
   {
-	//printf(" In read_fast fd read not successful\n");
 	dout(10)<<" In read_fast fd read not successful\n" << dendl;
 	int flags = O_RDWR;
     	fd = ::open(fullPath.c_str(), flags, 0644);
     	if (fd < 0) 
 	{
-		//printf(" In read_fast fullpath read not successful\n");
 		dout(10)<<" In read_fast fullpath read not successful\n"<<dendl;
   		int r = lfn_open_fast(cid, oid, fd, fullPath);
   		if (r < 0) 
