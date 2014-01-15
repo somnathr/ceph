@@ -51,7 +51,6 @@ static void get_raw_xattr_name(const char *name, int i, char *raw_name, int raw_
       break;
     default:
       pos++;
-      //assert(pos < raw_len - 1);
       *raw_name = *name;
       break;
     }

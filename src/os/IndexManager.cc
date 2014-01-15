@@ -129,7 +129,6 @@ int IndexManager::get_fd_fast(coll_t& c, const ghobject_t &oid, const string& ba
 		{
 			char path[PATH_MAX];
 			snprintf(path, sizeof(path), "%s/current/%s", baseDir.c_str(), c.to_str().c_str());
-			//printf("get_fd_fast1 = %s\n", path);
 	
 			one_index = new HashIndex(c, path, g_conf->filestore_merge_threshold,
 							g_conf->filestore_split_multiple,
@@ -149,7 +148,6 @@ int IndexManager::get_fd_fast(coll_t& c, const ghobject_t &oid, const string& ba
 	{
 		return -1;
 	}
-	//printf("get_fd_fast3\n");
 	if (fullPath)
         {	
 		fd = one_index->fast_lookup(oid, flags, *fullPath);
@@ -160,7 +158,6 @@ int IndexManager::get_fd_fast(coll_t& c, const ghobject_t &oid, const string& ba
 		fd = one_index->fast_lookup(oid, flags, full_path);
 	}
 
-        //printf("get_fd_fast4 :: fd = %d\n", fd);
 	
 	return fd;	
 	

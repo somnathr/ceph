@@ -109,35 +109,19 @@ int LFNIndex::unlink(const ghobject_t &oid)
 int LFNIndex::fast_lookup(const ghobject_t &oid, int flags, string& full_path)
 {
   WRAP_RETRY(
-  //string full_path;
   full_path.reserve(get_base_path().size() + 6 + oid.hobj.oid.name.size() + 10 + 1 
 	+ oid.hobj.get_key().size() + 2 + 1 + 14 + oid.hobj.nspace.size() + 1 + 8);
 
   r = _lookup(oid, full_path);
   if (r < 0)
     goto out;
-  /*struct stat buf;
-  maybe_inject_failure();
-  r = ::stat(full_path.c_str(), &buf);
-  maybe_inject_failure();
-  if (r < 0) {
-    if (errno == ENOENT) {
-      *exist = 0;
-    } else {
-      r = -errno;
-      goto out;
-    }
-  }*/
-    //printf ("Opening file =%s\n", full_path.c_str()); 
     r = ::open(full_path.c_str(), flags, 0644);
     if (r < 0) {
       r = -errno;
       dout(2) << "error opening file " << full_path << " with flags="
 	       << flags << "with error = " << cpp_strerror(-r) << dendl;
-      //goto out;
       
     }
-    //printf("FD = %d\n", r);
     
   
   );
@@ -770,8 +754,6 @@ int LFNIndex::lfn_generate_object_name(const ghobject_t &oid, string& full_name)
   if (index_version == HASH_INDEX_TAG_2)
     return lfn_generate_object_name_poolless(oid, full_name);
 
-  //dout(0) << "oid.hobj.oid.name = " << oid.hobj.oid.name << dendl;
-
   string::const_iterator i = oid.hobj.oid.name.begin();
   if (oid.hobj.oid.name.substr(0, 4) == "DIR_") {
     full_name.append("\\d");
@@ -780,62 +762,39 @@ int LFNIndex::lfn_generate_object_name(const ghobject_t &oid, string& full_name)
     full_name.append("\\.");
     ++i;
   }
-  //full_name.reserve(oid.hobj.oid.name.size() + 1 + oid.hobj.get_key().size() + 1 + 14 + oid.hobj.nspace.size() + 1 + 8);   
-  //dout(0) << "full_name_1 = " << full_name << dendl;  
   append_escaped(i, oid.hobj.oid.name.end(), &full_name);
   
   full_name.push_back('_');
-  //dout(0) << "full_name_2 = " << full_name << dendl;
-  //full_name.append("_");
   if (oid.hobj.get_key().size())
   {
   	append_escaped(oid.hobj.get_key().begin(), oid.hobj.get_key().end(), &full_name);
   }
-  //full_name.append("_");
   full_name.push_back('_');
   
-  //dout(0) << "full_name_3 = " << full_name << dendl;
 
   char buf[PATH_MAX];
-  //char *t = buf;
-  //char *end = t + sizeof(buf);
   if (oid.hobj.snap == CEPH_NOSNAP)
-    //t += snprintf(t, end - t, "head");
-    //snprintf(buf, PATH_MAX, "head_%.*X", (int)(sizeof(oid.hobj.hash)*2), oid.hobj.hash);
     sprintf(buf, "head_%.*X_", (int)(sizeof(oid.hobj.hash)*2), oid.hobj.hash);
   else if (oid.hobj.snap == CEPH_SNAPDIR)
-    //t += snprintf(t, end - t, "snapdir");
-    //snprintf(buf, PATH_MAX, "snapdir_%.*X", (int)(sizeof(oid.hobj.hash)*2), oid.hobj.hash);
     sprintf(buf, "snapdir_%.*X_", (int)(sizeof(oid.hobj.hash)*2), oid.hobj.hash);
   else
-    //snprintf(buf, PATH_MAX, "%llx_%.*X", (long long unsigned)oid.hobj.snap, (int)(sizeof(oid.hobj.hash)*2), oid.hobj.hash);
     sprintf(buf, "%llx_%.*X_", (long long unsigned)oid.hobj.snap, (int)(sizeof(oid.hobj.hash)*2), oid.hobj.hash);
-    //t += snprintf(t, end - t, "%llx", (long long unsigned)oid.hobj.snap);
-  //snprintf(t, end - t, "_%.*X", (int)(sizeof(oid.hobj.hash)*2), oid.hobj.hash);
   full_name += buf;
-  //full_name.append("_");
-  //full_name.push_back('_');
 
-  //dout(0) << "full_name_4 = " << full_name << dendl;
 
   if (oid.hobj.nspace.size())
   {
   	append_escaped(oid.hobj.nspace.begin(), oid.hobj.nspace.end(), &full_name);
   }
-  //full_name.append("_");
   full_name.push_back('_');
 
   char* t = buf;
   char* end = t + sizeof(buf);
   if (oid.hobj.pool == -1)
-    //t += snprintf(t, end - t, "none");
     t += sprintf(t, "none");
   else
-    //t += snprintf(t, end - t, "%llx", (long long unsigned)oid.hobj.pool);
     t += sprintf(t, "%llx", (long long unsigned)oid.hobj.pool);
   full_name += buf;
-
-  //dout(0) << "full_name_5 = " << full_name << dendl;
 
   if (oid.generation != ghobject_t::NO_GEN) {
     assert(oid.shard_id != ghobject_t::NO_SHARD);
@@ -959,12 +918,10 @@ string LFNIndex::lfn_generate_object_name_poolless(const ghobject_t &oid)
 
 int LFNIndex::lfn_get_name(const ghobject_t &oid, string& full_path )
 {
-  //string full_name;
   full_path.push_back('/');
   if (oid.hobj.oid.name.size() < 176)
   {
   	lfn_generate_object_name(oid, full_path);
-  	//dout(0) << "lfn_get_name::full_name = " << full_name << dendl;
 	return 0;
   }
   int r;

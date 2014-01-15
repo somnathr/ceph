@@ -294,49 +294,29 @@ int HashIndex::_remove(const vector<string> &path,
 //this lookup is used for io path to reduce cpu consumption
 int HashIndex::_lookup(const ghobject_t &oid, string& full_path)
 {
-	//char buf[MAX_HASH_LEVEL + 1];
-	//snprintf(buf, sizeof(buf), "%.*X", MAX_HASH_LEVEL, (uint32_t)oid.hobj.get_filestore_key());
-	//sprintf(buf, "%.*X", MAX_HASH_LEVEL, (uint32_t)oid.hobj.get_filestore_key());
-	//string hash_val = buf;
-	//char* t = NULL;
-	//string path = get_base_path();
 	full_path = get_base_path();
-	//if (full_path.substr(full_path.size() - 5, 5) == "/meta") 
-	//if (full_path.substr(full_path.size() - 5, 5) == "/meta") 
-	//{
-		char buf[MAX_HASH_LEVEL + 1];
-		sprintf(buf, "%.*X", MAX_HASH_LEVEL, (uint32_t)oid.hobj.get_filestore_key());
-		struct stat stat_buf;
-		/*if ((path.empty()) || (::stat(path.c_str(), &stat_buf)))
-        	{
-			return -ENOENT;
-        }	*/
+	char buf[MAX_HASH_LEVEL + 1];
+	sprintf(buf, "%.*X", MAX_HASH_LEVEL, (uint32_t)oid.hobj.get_filestore_key());
+	struct stat stat_buf;
 
-	
-		//for ( string::iterator it = hash_val.begin(); it!= hash_val.end(); ++it)
-		for (int it = 0; it < strlen(buf); it++  )
+	for (int it = 0; it < strlen(buf); it++  )
+	{
+		string tmp_string = full_path;
+		tmp_string += "/DIR_" ;
+		tmp_string.push_back(buf[it]);
+		dout(20) << "tmp_string = " << tmp_string <<dendl;	
+  		if (::stat(tmp_string.c_str(), &stat_buf))
 		{
-			string tmp_string = full_path;
-			//string tmp_dir = "/DIR_" + string(1,*it);
-			//string tmp_string = path + tmp_dir;
-			//string tmp_string = path + "/DIR_" + string(1,*it);
-			tmp_string += "/DIR_" ;
-			tmp_string.push_back(buf[it]);
-			//dout(0) << "tmp_string = " << tmp_string <<dendl;	
-  			if (::stat(tmp_string.c_str(), &stat_buf))
-			{
-				//dout(0) << "tmp_string = " << tmp_string << " doesn't exist.." << dendl;
-				break;
-			}
-			else
-			{
-				//path += tmp_dir;
-				full_path = tmp_string;
-			}	
+			dout(20) << "tmp_string = " << tmp_string << " doesn't exist.." << dendl;
+			break;
+		}
+		else
+		{
+			full_path = tmp_string;
+		}	
 			
 				
-		}
-	//}
+	}
 
 	return lfn_get_name(oid, full_path);
 }
