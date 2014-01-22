@@ -1278,7 +1278,9 @@ public:
     uint64_t offset,
     size_t len,
     bufferlist& bl,
-    bool allow_eio = false) = 0;
+    bool allow_eio = false,
+    int fd = -1,
+    string* fullPath = NULL) = 0;
 
   /**
    * fiemap -- get extent map of data of an object
