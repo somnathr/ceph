@@ -178,6 +178,11 @@ protected:
     string *mangled_name,
     int *exists
     );
+
+  int _lookup(
+    const ghobject_t &oid, 
+    string& full_path);
+
   int _collection_list(
     vector<ghobject_t> *ls
     );
