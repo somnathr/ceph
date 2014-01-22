@@ -7216,18 +7216,14 @@ SnapSetContext *ReplicatedPG::get_snapset_context(
   bool can_create,
   map<string, bufferlist> *attrs)
 {
-  Mutex::Locker l(snapset_contexts_lock);
   SnapSetContext *ssc;
-  map<hobject_t, SnapSetContext*>::iterator p = snapset_contexts.find(
-    oid.get_snapdir());
+  snapset_contexts_lock.Lock();
+  map<object_t, SnapSetContext*>::iterator p = snapset_contexts.find(oid);
   if (p != snapset_contexts.end()) {
-    if (can_create || p->second->exists) {
-      ssc = p->second;
-      ssc->exists = true;
-    } else {
-      return NULL;
-    }
+    ssc = p->second;
+    snapset_contexts_lock.Unlock();
   } else {
+    snapset_contexts_lock.Unlock();
     bufferlist bv;
     if (!attrs) {
       int r = pgbackend->objects_get_attr(oid.get_head(), SS_ATTR, &bv);
@@ -7241,8 +7237,11 @@ SnapSetContext *ReplicatedPG::get_snapset_context(
       assert(attrs->count(SS_ATTR));
       bv = attrs->find(SS_ATTR)->second;
     }
-    ssc = new SnapSetContext(oid.get_snapdir());
+    ssc = new SnapSetContext(oid);
+    snapset_contexts_lock.Lock();
     _register_snapset_context(ssc);
+    snapset_contexts_lock.Unlock();
+
     if (bv.length()) {
       bufferlist::iterator bvp = bv.begin();
       ssc->snapset.decode(bvp);
