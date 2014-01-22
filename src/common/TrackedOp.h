@@ -65,7 +65,6 @@ class OpTracker {
   OpHistory history;
   float complaint_time;
   int log_threshold;
-
 public:
   bool tracking_enabled;
   CephContext *cct;
