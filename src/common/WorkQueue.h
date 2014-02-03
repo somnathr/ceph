@@ -24,6 +24,8 @@
 class CephContext;
 
 class ThreadPool : public md_config_obs_t {
+
+protected:
   CephContext *cct;
   string name;
   string lockname;
@@ -37,6 +39,7 @@ class ThreadPool : public md_config_obs_t {
 public:
   class TPHandle {
     friend class ThreadPool;
+    friend class ThreadPoolSharded;
     CephContext *cct;
     heartbeat_handle_d *hb;
     time_t grace;
@@ -51,7 +54,7 @@ public:
     void reset_tp_timeout();
     void suspend_tp_timeout();
   };
-private:
+protected:
 
   struct WorkQueue_ {
     string name;
@@ -65,6 +68,10 @@ private:
     virtual void *_void_dequeue() = 0;
     virtual void _void_process(void *item, TPHandle &handle) = 0;
     virtual void _void_process_finish(void *) = 0;
+    virtual void  _lock_queue() {assert(0); }
+    virtual void  _unlock_queue() {assert(0); }
+    virtual void  _wait_on_queue() {assert(0); }
+    virtual void _signal_queue_threads() {assert(0); }
   };
 
   // track thread pool size changes
@@ -304,17 +311,17 @@ public:
 
   };
 
-private:
+protected:
   vector<WorkQueue_*> work_queues;
   int last_work_queue;
- 
 
   // threads
   struct WorkThread : public Thread {
     ThreadPool *pool;
-    WorkThread(ThreadPool *p) : pool(p) {}
+    int queue_index;
+    WorkThread(ThreadPool *p, int q_index = -1) : pool(p), queue_index(q_index) {}
     void *entry() {
-      pool->worker(this);
+      pool->worker(this, queue_index);
       return 0;
     }
   };
@@ -322,14 +329,14 @@ private:
   set<WorkThread*> _threads;
   list<WorkThread*> _old_threads;  ///< need to be joined
   int processing;
-
-  void start_threads();
+  bool is_sharded;
+  virtual void start_threads();
   void join_old_threads();
-  void worker(WorkThread *wt);
+  virtual void worker(WorkThread *wt, int queue_index);
 
 public:
-  ThreadPool(CephContext *cct_, string nm, int n, const char *option = NULL);
-  ~ThreadPool();
+  ThreadPool(CephContext *cct_, string nm, int n, const char *option = NULL, bool sharding_pool = false);
+  virtual ~ThreadPool();
 
   /// return number of threads currently running
   int get_num_threads() {
@@ -377,6 +384,73 @@ public:
   }
 
   /// start thread pool thread
+  virtual void start();
+  /// stop thread pool thread
+  virtual void stop(bool clear_after=true);
+  /// pause thread pool (if it not already paused)
+  virtual void pause();
+  /// pause initiation of new work
+  virtual void pause_new();
+  /// resume work in thread pool.  must match each pause() call 1:1 to resume.
+  virtual void unpause();
+  /// wait for all work to complete
+  virtual void drain(WorkQueue_* wq = 0);
+};
+
+class ThreadPoolSharded : public  ThreadPool {
+
+  atomic_t stop_io_thread;
+  int num_qs;
+
+public:
+
+  template<typename T>
+  class WorkQueueSharded : public WorkQueue_ {
+    ThreadPool *pool;
+
+  protected:
+    virtual void _enqueue_item(T) = 0;
+    virtual void _process_item(TPHandle &) = 0;
+    virtual void _process_finish() {}
+
+    void *_void_dequeue() {
+      return (void *)1;
+    }
+    void _void_process(void *item, TPHandle &handle) {
+
+      _process_item(handle);
+
+    }
+
+    void _void_process_finish(void * item) {
+
+      _process_finish();
+    }
+
+
+  public:
+    WorkQueueSharded(string n, time_t ti, time_t sti, ThreadPool *p)
+      : WorkQueue_(n, ti, sti), pool(p) {
+      pool->add_work_queue(this);
+
+
+    }
+    ~WorkQueueSharded() {
+      pool->remove_work_queue(this);
+    }
+
+    void queue_item(T item) {
+      _enqueue_item(item);
+    }
+  };
+
+public:
+
+  ThreadPoolSharded(CephContext *cct_, string nm, int num_threads, int num_qs, const char *option_thread = NULL);
+
+  ~ThreadPoolSharded(){};
+
+  /// start thread pool thread
   void start();
   /// stop thread pool thread
   void stop(bool clear_after=true);
@@ -388,6 +462,14 @@ public:
   void unpause();
   /// wait for all work to complete
   void drain(WorkQueue_* wq = 0);
+
+  void start_threads();
+  void worker(WorkThread *wt, int queue_index);
+
+  void handle_conf_change(const struct md_config_t *conf,
+				  const std::set <std::string> &changed) ;
+
+
 };
 
 class GenContextWQ :
