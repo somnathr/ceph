@@ -892,6 +892,7 @@ OSD::OSD(CephContext *cct_, ObjectStore *store_,
   osd_compat(get_osd_compat_set()),
   state(STATE_INITIALIZING), epoch_lock(), boot_epoch(0), up_epoch(0), bind_epoch(0),
   op_tp(cct, "OSD::op_tp", cct->_conf->osd_op_threads, "osd_op_threads"),
+  op_shard_tp(cct,"OSD::op_sharded_tp",cct->_conf->osd_op_sharded_threads, cct->_conf->osd_op_shard_depth, "osd_op_sharded_threads"),
   recovery_tp(cct, "OSD::recovery_tp", cct->_conf->osd_recovery_threads, "osd_recovery_threads"),
   disk_tp(cct, "OSD::disk_tp", cct->_conf->osd_disk_threads, "osd_disk_threads"),
   command_tp(cct, "OSD::command_tp", 1),
@@ -933,16 +934,29 @@ OSD::OSD(CephContext *cct_, ObjectStore *store_,
   remove_wq(store, cct->_conf->osd_remove_thread_timeout, &disk_tp),
   next_removal_seq(0),
   service(this)
+
 {
+  int shard_depth = cct->_conf->osd_op_shard_depth;
+
+  for(int i = 0; i < shard_depth; i++) {
+    OpShardedQ* op_shard_wq = new OpShardedQ (this, cct->_conf->osd_op_thread_timeout, &op_shard_tp); 
+    shard_wq.push_back(op_shard_wq);
+  }
+  
   monc->set_messenger(client_messenger);
   op_tracker.set_complaint_and_threshold(cct->_conf->osd_op_complaint_time,
                                          cct->_conf->osd_op_log_threshold);
   op_tracker.set_history_size_and_duration(cct->_conf->osd_op_history_size,
                                            cct->_conf->osd_op_history_duration);
+
 }
 
 OSD::~OSD()
 {
+  for (uint32_t i = 0; i < shard_wq.size(); i++) {
+    delete shard_wq[i];
+  }
+  shard_wq.clear();
   delete authorize_handler_cluster_registry;
   delete authorize_handler_service_registry;
   delete class_handler;
@@ -1249,6 +1263,7 @@ int OSD::init()
   monc->set_log_client(&clog);
 
   op_tp.start();
+  op_shard_tp.start();
   recovery_tp.start();
   disk_tp.start();
   command_tp.start();
@@ -1641,6 +1656,10 @@ int OSD::shutdown()
   op_tp.drain();
   op_tp.stop();
   dout(10) << "op tp stopped" << dendl;
+
+  op_shard_tp.stop();
+  dout(10) << "op sharded tp stopped" << dendl;
+  
 
   command_tp.drain();
   command_tp.stop();
@@ -7818,7 +7837,18 @@ void OSD::enqueue_op(PG *pg, OpRequestRef op)
 	   << " cost " << op->get_req()->get_cost()
 	   << " latency " << latency
 	   << " " << *(op->get_req()) << dendl;
-  pg->queue_op(op);
+
+  int op_waiting = pg->queue_op(op);
+  if (op_waiting > 0 ){
+        return;
+  }
+
+  MOSDOp *m = static_cast<MOSDOp*>(op->get_req());
+  uint32_t queue_num = (m->get_pg().ps())% shard_wq.size() ;
+  dout(20) << " Sending ops to thread_pool_num = " << queue_num << dendl;
+
+  shard_wq[queue_num]->queue_item(make_pair(PGRef(pg), op)); 
+
 }
 
 void OSD::OpWQ::_enqueue(pair<PGRef, OpRequestRef> item)

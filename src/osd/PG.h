@@ -207,7 +207,7 @@ protected:
   OSDMapRef last_persisted_osdmap_ref;
   PGPool pool;
 
-  void queue_op(OpRequestRef op);
+  int queue_op(OpRequestRef op);
   void take_op_map_waiters();
 
   void update_osdmap_ref(OSDMapRef newmap) {
