@@ -2691,7 +2691,13 @@ int FileStore::read(
     if (fd < 0){
       dout(10)<<" In read_fast fullpath read not successful\n"<<dendl;
       if (!g_conf->filestore_use_fd_cache){
-        r = lfn_open(cid, oid, fd, *fullPath);
+        if (fullPath) {
+          r = lfn_open(cid, oid, fd, *fullPath);
+        }
+        else {
+          string tmpPath;
+          r = lfn_open(cid, oid, fd, tmpPath);
+        }
       }
       else {
         FDRef outfd;
