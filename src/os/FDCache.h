@@ -51,7 +51,6 @@ public:
 private:
   CephContext *cct;
   int registry_shards;
-  uint64_t registry_mask;
   SharedLRU<ghobject_t, FD> *registry;
 
 public:
@@ -63,13 +62,6 @@ public:
     for (int i = 0; i < registry_shards; ++i) {
       registry[i].set_size(cct->_conf->filestore_fd_cache_size / registry_shards);
     }
-    // calculate the mask
-    int b = registry_shards;
-    while (b > 0) {
-      ++registry_mask;
-      b = b >> 1;
-    }
-    registry_mask = (1 << (registry_mask-1)) - 1;
   }
   ~FDCache() {
     cct->_conf->remove_observer(this);
@@ -78,21 +70,18 @@ public:
   typedef std::tr1::shared_ptr<FD> FDRef;
 
   FDRef lookup(const ghobject_t &hoid) {
-    int registry_id = (hoid.hobj.hash & registry_mask)
-        % registry_shards;
+    int registry_id = hoid.hobj.hash % registry_shards;
     return registry[registry_id].lookup(hoid);
   }
 
   FDRef add(const ghobject_t &hoid, int fd, bool *existed) {
-    int registry_id = (hoid.hobj.hash & registry_mask)
-        % registry_shards;
+    int registry_id = hoid.hobj.hash % registry_shards;
     return registry[registry_id].add(hoid, new FD(fd), existed);
   }
 
   /// clear cached fd for hoid, subsequent lookups will get an empty FD
   void clear(const ghobject_t &hoid) {
-    int registry_id = (hoid.hobj.hash & registry_mask)
-        % registry_shards;
+    int registry_id = hoid.hobj.hash % registry_shards;
     registry[registry_id].clear(hoid);
     assert(!registry[registry_id].lookup(hoid));
   }
