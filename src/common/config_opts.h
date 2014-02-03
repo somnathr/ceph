@@ -398,6 +398,8 @@ OPTION(osd_map_cache_size, OPT_INT, 500)
 OPTION(osd_map_message_max, OPT_INT, 100)  // max maps per MOSDMap message
 OPTION(osd_map_share_max_epochs, OPT_INT, 100)  // cap on # of inc maps we send to peers, clients
 OPTION(osd_op_threads, OPT_INT, 2)    // 0 == no threading
+OPTION(osd_op_sharded_threads, OPT_INT, 12)
+OPTION(osd_op_shard_depth, OPT_INT, 3)
 OPTION(osd_peering_wq_batch_size, OPT_U64, 20)
 OPTION(osd_op_pq_max_tokens_per_priority, OPT_U64, 4194304)
 OPTION(osd_op_pq_min_cost, OPT_U64, 65536)
