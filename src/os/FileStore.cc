@@ -3528,7 +3528,6 @@ int FileStore::getattr(coll_t cid, const ghobject_t& oid, const char *name, buff
     r = lfn_open(cid, oid, *fd, *fullPath);
     if (r < 0) {
       dout(10) << "FileStore::getattr_fast lfn_open_fast failed for " << *fullPath <<dendl;
-      exit(0);
       goto out;
     }
     r = _fgetattr(*fd, name, bp);
