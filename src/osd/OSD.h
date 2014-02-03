@@ -54,6 +54,7 @@ using namespace __gnu_cxx;
 #include "common/simple_cache.hpp"
 #include "common/sharedptr_registry.hpp"
 #include "common/PrioritizedQueue.h"
+#include <queue>
 
 #define CEPH_OSD_PROTOCOL    10 /* cluster internal */
 
@@ -843,7 +844,8 @@ public:
 
 private:
 
-  ThreadPool op_tp;
+  ThreadPool  op_tp;
+  ThreadPoolSharded  op_shard_tp;
   ThreadPool recovery_tp;
   ThreadPool disk_tp;
   ThreadPool command_tp;
@@ -980,6 +982,7 @@ public:
     }
   } heartbeat_dispatcher;
 
+
 private:
   // -- stats --
   Mutex stat_lock;
@@ -1016,6 +1019,78 @@ private:
   TestOpsSocketHook *test_ops_hook;
   friend struct C_CompleteSplits;
 
+  // -- sharded op queue
+
+  struct OpShardedQ: public ThreadPoolSharded::WorkQueueSharded< pair<PGRef, OpRequestRef> > {
+
+    Mutex qlock;
+    queue< pair <PGRef, OpRequestRef> > q_for_fast_processing;
+    Cond qcond;
+    OSD *osd;
+
+    OpShardedQ(OSD *o, time_t ti, ThreadPool *tp) 
+      : ThreadPoolSharded::WorkQueueSharded< pair<PGRef, OpRequestRef> >(
+        "OSD::OpShardedWQ", ti, ti*10, tp),
+        qlock("OpShardedWQ::qlock"),
+	osd(o)
+    {}
+
+    void  _lock_queue() {
+      qlock.Lock();
+    }
+
+    void  _unlock_queue() {
+      qlock.Unlock();
+    }
+
+    void  _wait_on_queue(){
+      qcond.WaitInterval(osd->cct, qlock, utime_t(2, 0));
+    }
+
+    void _signal_queue_threads() {
+      qlock.Lock();
+      qcond.SignalOne();
+      qlock.Unlock();
+    }
+
+    bool _empty() {
+      return q_for_fast_processing.empty();
+    }
+
+    void _clear() {
+     Mutex::Locker l(qlock);
+
+     while(!q_for_fast_processing.empty()){
+       q_for_fast_processing.pop(); 
+     }
+    }
+
+    void _enqueue_item(pair<PGRef, OpRequestRef> item){
+  
+      Mutex::Locker l(qlock);
+      q_for_fast_processing.push(item);
+      qcond.SignalOne();      
+    }
+      
+    void _process_item(ThreadPool::TPHandle &handle) {
+
+      pair<PGRef, OpRequestRef> item = q_for_fast_processing.front();
+      q_for_fast_processing.pop();
+      qlock.Unlock();
+
+      (item.first)->lock();
+      if (!(item.first)->deleting){
+        (item.first)->do_request(item.second, handle);
+      }
+      (item.first)->unlock();
+
+
+    } 
+      
+  
+  };
+
+  vector <OpShardedQ*> shard_wq; 
   // -- op queue --
 
   struct OpWQ: public ThreadPool::WorkQueueVal<pair<PGRef, OpRequestRef>,

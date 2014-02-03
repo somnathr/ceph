@@ -1383,19 +1383,19 @@ void PG::take_op_map_waiters()
   }
 }
 
-void PG::queue_op(OpRequestRef op)
+int PG::queue_op(OpRequestRef op)
 {
   Mutex::Locker l(map_lock);
   if (!waiting_for_map.empty()) {
     // preserve ordering
     waiting_for_map.push_back(op);
-    return;
+    return 1;
   }
   if (op_must_wait_for_map(get_osdmap_with_maplock(), op)) {
     waiting_for_map.push_back(op);
-    return;
+    return 1;
   }
-  osd->op_wq.queue(make_pair(PGRef(this), op));
+  return 0;
 }
 
 void PG::replay_queued_ops()
