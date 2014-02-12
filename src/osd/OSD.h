@@ -739,7 +739,7 @@ protected:
   void tick();
   void _dispatch(Message *m);
   void dispatch_op(OpRequestRef op);
-  bool dispatch_op_fast(OpRequestRef op, OSDMapRef osdmap);
+  bool dispatch_op_fast(const OpRequestRef& op, const OSDMapRef& osdmap);
 
   void check_osdmap_features();
 
@@ -870,7 +870,7 @@ public:
       session_dispatch_lock("Session::session_dispatch_lock")
     {}
   };
-  void dispatch_session_waiting(Session *session, OSDMapRef osdmap);
+  void dispatch_session_waiting(Session *session, const OSDMapRef& osdmap);
   Mutex session_waiting_for_map_lock;
   set<Session*> session_waiting_for_map;
   /// Caller assumes refs for included Sessions
@@ -1152,7 +1152,7 @@ private:
     void _process(PGRef pg, ThreadPool::TPHandle &handle);
   } op_wq;
 
-  void enqueue_op(PG *pg, OpRequestRef op);
+  void enqueue_op(PG *pg, const OpRequestRef& op);
   void dequeue_op(
     PGRef pg, OpRequestRef op,
     ThreadPool::TPHandle &handle);
@@ -1236,7 +1236,7 @@ private:
   void forget_peer_epoch(int p, epoch_t e);
 
   bool _share_map_incoming(entity_name_t name, Connection *con, epoch_t epoch,
-			   OSDMapRef osdmap,
+			   const OSDMapRef& osdmap,
 			   Session *session = 0);
   void _share_map_outgoing(int peer, Connection *con,
 			   OSDMapRef map = OSDMapRef());
@@ -1297,7 +1297,7 @@ protected:
 
   PGPool _get_pool(int id, OSDMapRef createmap);
 
-  PG *get_pg_or_queue_for_pg(pg_t pgid, OpRequestRef op);
+  PG *get_pg_or_queue_for_pg(const pg_t& pgid, const OpRequestRef& op);
   bool  _have_pg(pg_t pgid);
   PG   *_lookup_lock_pg_with_map_lock_held(pg_t pgid);
   PG   *_lookup_lock_pg(pg_t pgid);
@@ -1924,7 +1924,7 @@ public:
   void handle_rep_scrub(MOSDRepScrub *m);
   void handle_scrub(struct MOSDScrub *m);
   void handle_osd_ping(class MOSDPing *m);
-  void handle_op(OpRequestRef op, OSDMapRef osdmap);
+  void handle_op(const OpRequestRef& op, const OSDMapRef& osdmap);
 
   template <typename T, int MSGTYPE>
   void handle_replica_op(OpRequestRef op, OSDMapRef osdmap);
@@ -1935,7 +1935,7 @@ public:
 public:
   void force_remount();
 
-  int init_op_flags(OpRequestRef op);
+  int init_op_flags(const OpRequestRef& op);
 
   OSDService service;
   friend class OSDService;
