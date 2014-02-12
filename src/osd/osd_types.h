@@ -2158,13 +2158,11 @@ WRITE_CLASS_ENCODER(object_info_t)
 struct ObjectState {
   object_info_t oi;
   bool exists;         ///< the stored object exists (i.e., we will remember the object_info_t)
-  string fullPath;
-  int fd;
 
-  ObjectState() : exists(false), fd(-1) {}
+  ObjectState() : exists(false) {}
 
   ObjectState(const object_info_t &oi_, bool exists_)
-    : oi(oi_), exists(exists_), fd(-1) {}
+    : oi(oi_), exists(exists_) {}
 };
 
 

@@ -225,8 +225,7 @@
      const hobject_t &hoid,
      const string &attr,
      bufferlist *out,
-     int* fd = NULL,
-     string* fullPath = NULL) = 0;
+     bool io_path = false) = 0;
  };
 
 #endif
