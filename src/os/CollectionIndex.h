@@ -21,11 +21,13 @@
 
 #include "osd/osd_types.h"
 #include "include/object.h"
+#include "common/RWLock.h"
 
 /**
  * CollectionIndex provides an interface for manipulating indexed collections
  */
 class CollectionIndex {
+
 protected:
   /** 
    * Object encapsulating a returned path.
@@ -43,14 +45,14 @@ protected:
     /// Returned path
     string full_path;
     /// Ref to parent Index
-    std::tr1::shared_ptr<CollectionIndex> parent_ref;
+    CollectionIndex* parent_ref;
     /// coll_t for parent Index
     coll_t parent_coll;
 
     /// Normal Constructor
     Path(
       string path,                              ///< [in] Path to return.
-      std::tr1::weak_ptr<CollectionIndex> ref)  ///< [in] weak_ptr to parent.
+      CollectionIndex* ref)  ///< [in] weak_ptr to parent.
       : full_path(path), parent_ref(ref), parent_coll(parent_ref->coll()) {}
 
     /// Debugging Constructor
@@ -66,11 +68,14 @@ protected:
     coll_t coll() const { return parent_coll; }
 
     /// Getter for parent
-    std::tr1::shared_ptr<CollectionIndex> get_index() const {
+    CollectionIndex* get_index() const {
       return parent_ref;
     }
   };
  public:
+
+  RWLock access_lock;
+
   /// Type of returned paths
   typedef std::tr1::shared_ptr<Path> IndexedPath;
 
@@ -99,7 +104,7 @@ protected:
    *
    * @see IndexManager
    */
-  virtual void set_ref(std::tr1::shared_ptr<CollectionIndex> ref) = 0;
+  virtual void set_ref(CollectionIndex* ref) = 0;
 
   /** 
    * Initializes the index.
@@ -151,14 +156,6 @@ protected:
     int *exist	           ///< [out] True if the object exists, else false
     ) = 0;
 
-  virtual int fast_lookup(
-    const ghobject_t &oid, 
-    int flags, 
-    string& full_path) {
-  
-      return 0;
-  }
-
   /**
    * Moves objects matching <match> in the lsb <bits>
    *
@@ -169,7 +166,7 @@ protected:
   virtual int split(
     uint32_t match,                             //< [in] value to match
     uint32_t bits,                              //< [in] bits to check
-    std::tr1::shared_ptr<CollectionIndex> dest  //< [in] destination index
+    CollectionIndex* dest  //< [in] destination index
     ) { assert(0); return 0; }
 
 
@@ -193,6 +190,9 @@ protected:
 
   /// Virtual destructor
   virtual ~CollectionIndex() {}
+
+  CollectionIndex():access_lock("CollectionIndex::access_lock"){}
+
 };
 
 #endif
