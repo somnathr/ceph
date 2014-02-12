@@ -864,7 +864,7 @@ protected:
   void tick();
   void _dispatch(Message *m);
   void dispatch_op(OpRequestRef op);
-  bool dispatch_op_fast(OpRequestRef op, OSDMapRef osdmap);
+  bool dispatch_op_fast(const OpRequestRef& op, const OSDMapRef& osdmap);
 
   void check_osdmap_features(ObjectStore *store);
 
@@ -1013,7 +1013,7 @@ public:
       received_map_lock("Session::received_map_lock"), received_map_epoch(0)
     {}
   };
-  void dispatch_session_waiting(Session *session, OSDMapRef osdmap);
+  void dispatch_session_waiting(Session *session, const OSDMapRef& osdmap);
   Mutex session_waiting_for_map_lock;
   set<Session*> session_waiting_for_map;
   /// Caller assumes refs for included Sessions
@@ -1313,7 +1313,7 @@ private:
     void _process(PGRef pg, ThreadPool::TPHandle &handle);
   } op_wq;
 
-  void enqueue_op(PG *pg, OpRequestRef op);
+  void enqueue_op(PG *pg, const OpRequestRef& op);
   void dequeue_op(
     PGRef pg, OpRequestRef op,
     ThreadPool::TPHandle &handle);
@@ -1397,7 +1397,6 @@ private:
   void forget_peer_epoch(int p, epoch_t e);
 
   friend struct send_map_on_destruct;
-
   void _share_map_outgoing(int peer, Connection *con,
 			   OSDMapRef map = OSDMapRef());
 
@@ -2115,7 +2114,7 @@ public:
   void handle_rep_scrub(MOSDRepScrub *m);
   void handle_scrub(struct MOSDScrub *m);
   void handle_osd_ping(class MOSDPing *m);
-  void handle_op(OpRequestRef op, OSDMapRef osdmap);
+  void handle_op(const OpRequestRef& op, const OSDMapRef& osdmap);
 
   template <typename T, int MSGTYPE>
   void handle_replica_op(OpRequestRef op, OSDMapRef osdmap);
@@ -2126,7 +2125,7 @@ public:
 public:
   void force_remount();
 
-  int init_op_flags(OpRequestRef op);
+  int init_op_flags(const OpRequestRef& op);
 
   OSDService service;
   friend class OSDService;

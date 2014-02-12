@@ -2090,11 +2090,11 @@ public:
 
   // abstract bits
   virtual void do_request(
-    OpRequestRef op,
+    const OpRequestRef& op,
     ThreadPool::TPHandle &handle
   ) = 0;
 
-  virtual void do_op(OpRequestRef op) = 0;
+  virtual void do_op(const OpRequestRef& op) = 0;
   virtual void do_sub_op(OpRequestRef op) = 0;
   virtual void do_sub_op_reply(OpRequestRef op) = 0;
   virtual void do_scan(
