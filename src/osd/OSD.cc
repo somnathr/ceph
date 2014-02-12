@@ -1922,7 +1922,7 @@ PG *OSD::_create_lock_pg(
   return pg;
 }
 
-PG *OSD::get_pg_or_queue_for_pg(pg_t pgid, OpRequestRef op)
+PG *OSD::get_pg_or_queue_for_pg(const pg_t& pgid, const OpRequestRef& op)
 {
   {
     RWLock::RLocker l(pg_map_lock);
@@ -4360,7 +4360,7 @@ bool OSD::_share_map_incoming(
   entity_name_t name,
   Connection *con,
   epoch_t epoch,
-  OSDMapRef osdmap,
+  const OSDMapRef& osdmap,
   Session* session)
 {
   bool shared = false;
@@ -4532,7 +4532,7 @@ bool OSD::ms_dispatch(Message *m)
   return true;
 }
 
-void OSD::dispatch_session_waiting(Session *session, OSDMapRef osdmap)
+void OSD::dispatch_session_waiting(Session *session, const OSDMapRef& osdmap)
 {
   for (list<OpRequestRef>::iterator i = session->waiting_on_map.begin();
        i != session->waiting_on_map.end() && dispatch_op_fast(*i, osdmap);
@@ -4742,7 +4742,7 @@ epoch_t op_required_epoch(OpRequestRef op)
   }
 }
 
-bool OSD::dispatch_op_fast(OpRequestRef op, OSDMapRef osdmap) {
+bool OSD::dispatch_op_fast(const OpRequestRef& op, const OSDMapRef& osdmap) {
   epoch_t msg_epoch(op_required_epoch(op));
   if (msg_epoch > osdmap->get_epoch())
     return false;
@@ -7007,7 +7007,7 @@ void OSDService::handle_misdirected_op(PG *pg, OpRequestRef op)
   reply_op_error(op, -ENXIO);
 }
 
-void OSD::handle_op(OpRequestRef op, OSDMapRef osdmap)
+void OSD::handle_op(const OpRequestRef& op, const OSDMapRef& osdmap)
 {
   MOSDOp *m = static_cast<MOSDOp*>(op->get_req());
   assert(m->get_header().type == CEPH_MSG_OSD_OP);
@@ -7178,7 +7178,7 @@ bool OSD::op_is_discardable(MOSDOp *op)
 /*
  * enqueue called with osd_lock held
  */
-void OSD::enqueue_op(PG *pg, OpRequestRef op)
+void OSD::enqueue_op(PG *pg, const OpRequestRef& op)
 {
   utime_t latency = ceph_clock_now(cct) - op->get_req()->get_recv_stamp();
   dout(15) << "enqueue_op " << op << " prio " << op->get_req()->get_priority()
@@ -7415,7 +7415,7 @@ void OSD::handle_conf_change(const struct md_config_t *conf,
 
 // --------------------------------
 
-int OSD::init_op_flags(OpRequestRef op)
+int OSD::init_op_flags(const OpRequestRef& op)
 {
   MOSDOp *m = static_cast<MOSDOp*>(op->get_req());
   vector<OSDOp>::iterator iter;

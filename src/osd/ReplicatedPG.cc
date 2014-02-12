@@ -823,7 +823,7 @@ void ReplicatedPG::get_src_oloc(const object_t& oid, const object_locator_t& olo
 
 
 void ReplicatedPG::do_request(
-  OpRequestRef op,
+  const OpRequestRef& op,
   ThreadPool::TPHandle &handle)
 {
   // do any pending flush
@@ -882,7 +882,7 @@ void ReplicatedPG::do_request(
  * pg lock will be held (if multithreaded)
  * osd_lock NOT held.
  */
-void ReplicatedPG::do_op(OpRequestRef op)
+void ReplicatedPG::do_op(const OpRequestRef& op)
 {
   MOSDOp *m = static_cast<MOSDOp*>(op->get_req());
   assert(m->get_header().type == CEPH_MSG_OSD_OP);
@@ -1226,7 +1226,7 @@ void ReplicatedPG::do_cache_redirect(OpRequestRef op, ObjectContextRef obc)
 void ReplicatedPG::execute_ctx(OpContext *ctx)
 {
   dout(10) << __func__ << " " << ctx << dendl;
-  OpRequestRef op = ctx->op;
+  const OpRequestRef& op = ctx->op;
   MOSDOp *m = static_cast<MOSDOp*>(op->get_req());
   ObjectContextRef obc = ctx->obc;
   const hobject_t& soid = obc->obs.oi.soid;
