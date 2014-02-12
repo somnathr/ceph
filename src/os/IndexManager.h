@@ -28,7 +28,7 @@
 
 
 /// Public type for Index
-typedef ceph::shared_ptr<CollectionIndex> Index;
+typedef CollectionIndex* Index;
 /**
  * Encapsulates mutual exclusion for CollectionIndexes.
  *
@@ -50,28 +50,9 @@ class IndexManager {
   bool upgrade;
 
   /// Currently in use CollectionIndices
-  map<coll_t,ceph::weak_ptr<CollectionIndex> > col_indices;
+  map<coll_t, Index > col_indices;
 
   hash_map<coll_t, CollectionIndex*> col_indices_io_path;
-
-  /// Cleans up state for c @see RemoveOnDelete
-  void put_index(
-    coll_t c ///< Put the index for c
-    );
-
-  /// Callback for shared_ptr release @see get_index
-  class RemoveOnDelete {
-  public:
-    coll_t c;
-    IndexManager *manager;
-    RemoveOnDelete(coll_t c, IndexManager *manager) : 
-      c(c), manager(manager) {}
-
-    void operator()(CollectionIndex *index) {
-      manager->put_index(c);
-      delete index;
-    }
-  };
 
   /**
    * Index factory
@@ -90,6 +71,7 @@ public:
   IndexManager(bool upgrade) : lock("IndexManager lock"),
 			       upgrade(upgrade) {}
 
+  ~IndexManager();
   /**
    * Reserve and return index for c
    *
@@ -98,7 +80,7 @@ public:
    * @param [out] index Index for c
    * @return error code
    */
-  int get_index(coll_t c, const char *path, Index *index);
+  int get_index(coll_t c, const string& baseDir, Index *index);
 
   /**
    * Initialize index for collection c at path
@@ -110,7 +92,6 @@ public:
    */
   int init_index(coll_t c, const char *path, uint32_t filestore_version);
 
-  int get_fd_fast(coll_t& c, const ghobject_t &oid, const string& baseDir, int flags, int& fd, string* fullPath = NULL); 
 
   bool isUpgrade()
   {
