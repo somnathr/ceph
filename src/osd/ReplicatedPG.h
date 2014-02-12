@@ -1221,6 +1221,7 @@ public:
 
   int do_command(cmdmap_t cmdmap, ostream& ss, bufferlist& idata,
 		 bufferlist& odata);
+  // abstract bits
 
   void do_request(
     OpRequestRef op,

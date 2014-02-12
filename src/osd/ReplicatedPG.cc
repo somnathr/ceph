@@ -1056,6 +1056,7 @@ void ReplicatedPG::get_src_oloc(const object_t& oid, const object_locator_t& olo
     src_oloc.key = oid.name;
 }
 
+
 void ReplicatedPG::do_request(
   OpRequestRef op,
   ThreadPool::TPHandle &handle)
@@ -6878,6 +6879,7 @@ ObjectContextRef ReplicatedPG::get_object_context(const hobject_t& soid,
     (pg_log.get_log().objects.count(soid) &&
       pg_log.get_log().objects.find(soid)->second->op ==
       pg_log_entry_t::LOST_REVERT));
+
   ObjectContextRef obc = object_contexts.lookup(soid);
   if (obc) {
     dout(10) << __func__ << ": found obc in cache: " << obc
@@ -6925,10 +6927,13 @@ ObjectContextRef ReplicatedPG::get_object_context(const hobject_t& soid,
     obc->obs.oi = oi;
     obc->obs.exists = true;
 
-    obc->ssc = get_snapset_context(
-      soid, true,
-      soid.has_snapset() ? attrs : 0);
-    register_snapset_context(obc->ssc);
+    if (need_snap)
+    {
+      obc->ssc = get_snapset_context(
+                soid.oid, soid.get_key(), soid.hash,
+                true, soid.get_namespace(),
+                soid.has_snapset() ? attrs : 0);
+    }
 
     populate_obc_watchers(obc);
 
