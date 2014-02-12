@@ -181,9 +181,6 @@ public:
     int *exist
     );
 
-  int fast_lookup(const ghobject_t &oid, 
-    int flags, 
-    string& full_path);
 
   /// @see CollectionIndex
   int collection_list(
@@ -246,7 +243,8 @@ protected:
 
   virtual int _lookup(
     const ghobject_t &oid, 
-    string& full_path) = 0;
+    string& full_path,
+    string* mangled_name = NULL) = 0;
 
   /**
    * List contents of the collection, must be implemented by derived class.
@@ -428,7 +426,7 @@ protected:
 
   int lfn_get_name(
     const ghobject_t &oid,
-    string& full_path );
+    string& full_path, string* mangled_name = NULL );
 
 
 private:
@@ -506,11 +504,8 @@ private:
 
   int lfn_generate_object_name(
     const ghobject_t &oid, 
-    string& full_name);
-  /// Generate object name
-  string lfn_generate_object_name(
-    const ghobject_t &oid ///< [in] Object for which to generate.
-    ); ///< @return Generated object name.
+    string& full_name,
+    bool io_path = false);
 
   /// Parse object name
   bool lfn_parse_object_name_keyless(
