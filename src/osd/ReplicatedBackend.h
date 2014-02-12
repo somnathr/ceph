@@ -168,8 +168,7 @@ public:
     const hobject_t &hoid,
     const string &attr,
     bufferlist *out,
-    int* fd = NULL,
-    string* fullPath = NULL);
+    bool io_path = false);
 private:
   // push
   struct PushInfo {

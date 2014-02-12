@@ -398,10 +398,6 @@ public:
       num_write(0),
       copy_cb(NULL),
       lock_to_release(NONE) {
-
-      new_obs.fd = _obs->fd;
-      new_obs.fullPath = _obs->fullPath;
-
       if (_ssc) {
 	new_snapset = _ssc->snapset;
 	snapset = &_ssc->snapset;
@@ -959,6 +955,7 @@ public:
 
   int do_command(cmdmap_t cmdmap, ostream& ss, bufferlist& idata,
 		 bufferlist& odata);
+  // abstract bits
 
   void do_request(
     OpRequestRef op,

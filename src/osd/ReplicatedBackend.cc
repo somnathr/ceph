@@ -253,8 +253,7 @@ int ReplicatedBackend::objects_get_attr(
   const hobject_t &hoid,
   const string &attr,
   bufferlist *out,
-  int* fd,
-  string* fullPath
+  bool io_path 
   )
 {
   bufferptr bp;
@@ -263,8 +262,7 @@ int ReplicatedBackend::objects_get_attr(
     hoid,
     attr.c_str(),
     bp,
-    fd,
-    fullPath);
+    io_path);
   if (r >= 0 && out) {
     out->clear();
     out->push_back(bp);

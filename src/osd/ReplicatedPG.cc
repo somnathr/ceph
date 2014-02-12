@@ -821,6 +821,7 @@ void ReplicatedPG::get_src_oloc(const object_t& oid, const object_locator_t& olo
     src_oloc.key = oid.name;
 }
 
+
 void ReplicatedPG::do_request(
   OpRequestRef op,
   ThreadPool::TPHandle &handle)
@@ -2473,7 +2474,7 @@ int ReplicatedPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
       {
 	// read into a buffer
 	bufferlist bl;
-        int  r = osd->store->read(coll, soid, op.extent.offset, op.extent.length, bl, false, obs.fd, &obs.fullPath);
+        int  r = osd->store->read(coll, soid, op.extent.offset, op.extent.length, bl, false);
 	if (first_read) {
 	  first_read = false;
 	  ctx->data_off = op.extent.offset;
@@ -2482,6 +2483,7 @@ int ReplicatedPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
 	if (r >= 0) 
 	  op.extent.length = r;
 	else {
+          dout(0) << " read failed for obj " << soid << dendl;
 	  result = r;
 	  op.extent.length = 0;
 	}
@@ -5239,8 +5241,7 @@ ObjectContextRef ReplicatedPG::get_object_context(const hobject_t& soid,
       pg_log.get_log().objects.find(soid)->second->op ==
       pg_log_entry_t::LOST_REVERT));
 
-  int fd,r;
-  string fullPath;
+  int r;
 
   ObjectContextRef obc = object_contexts.lookup(soid);
   if (obc) {
@@ -5253,15 +5254,17 @@ ObjectContextRef ReplicatedPG::get_object_context(const hobject_t& soid,
       bv.push_back(attrs->find(OI_ATTR)->second);
     } else {
       if (!need_snap){
-        r = pgbackend->objects_get_attr(soid, "user.ceph._", &bv, &fd, &fullPath);
+        r = pgbackend->objects_get_attr(soid, "user.ceph._", &bv, true);
       }
       else {
         r = pgbackend->objects_get_attr(soid, OI_ATTR, &bv);
       }
 
       if (r < 0) {
-	if (!can_create)
+	if (!can_create){
+          dout(10) << "objects_get_attr failed for object " << soid << dendl;
 	  return ObjectContextRef();   // -ENOENT!
+        }
 
 	// new object.
 	object_info_t oi(soid);
@@ -5281,14 +5284,9 @@ ObjectContextRef ReplicatedPG::get_object_context(const hobject_t& soid,
     obc->obs.oi = oi;
     obc->obs.exists = true;
 
-    if (!need_snap)
+    if (need_snap)
     {
-        obc->obs.fd = fd;
-        obc->obs.fullPath = fullPath;
-    }
-    else
-    {
-        obc->ssc = get_snapset_context(
+      obc->ssc = get_snapset_context(
                 soid.oid, soid.get_key(), soid.hash,
                 true, soid.get_namespace(),
                 soid.has_snapset() ? attrs : 0);
