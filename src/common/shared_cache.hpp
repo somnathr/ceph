@@ -22,6 +22,7 @@
 #include "common/Mutex.h"
 #include "common/Cond.h"
 
+
 template <class K, class V>
 class SharedLRU {
   typedef std::tr1::shared_ptr<V> VPtr;
@@ -43,7 +44,7 @@ class SharedLRU {
     }
   }
 
-  void lru_remove(K key) {
+  void lru_remove(const K& key) {
     typename map<K, typename list<pair<K, VPtr> >::iterator>::iterator i =
       contents.find(key);
     if (i == contents.end())
@@ -53,7 +54,7 @@ class SharedLRU {
     contents.erase(i);
   }
 
-  void lru_add(K key, VPtr val, list<VPtr> *to_release) {
+  void lru_add(const K& key, const VPtr& val, list<VPtr> *to_release) {
     typename map<K, typename list<pair<K, VPtr> >::iterator>::iterator i =
       contents.find(key);
     if (i != contents.end()) {
@@ -66,7 +67,7 @@ class SharedLRU {
     }
   }
 
-  void remove(K key) {
+  void remove(const K& key) {
     Mutex::Locker l(lock);
     weak_refs.erase(key);
     cond.Signal();
@@ -93,7 +94,7 @@ public:
     assert(weak_refs.empty());
   }
 
-  void clear(K key) {
+  void clear(const K& key) {
     VPtr val; // release any ref we have after we drop the lock
     {
       Mutex::Locker l(lock);
@@ -119,7 +120,7 @@ public:
     return weak_refs.begin()->first;
   }
 
-  VPtr lower_bound(K key) {
+  VPtr lower_bound(const K& key) {
     VPtr val;
     list<VPtr> to_release;
     {
@@ -145,7 +146,7 @@ public:
     return val;
   }
 
-  VPtr lookup(K key) {
+  VPtr lookup(const K& key) {
     VPtr val;
     list<VPtr> to_release;
     {
@@ -181,25 +182,27 @@ public:
    * map, false otherwise
    * @return A reference to the map's value for the given key
    */
-  VPtr add(K key, V *value, bool *existed) {
-    VPtr val(value, Cleanup(this, key));
+  VPtr add(const K& key, V *value, bool *existed) {
+    VPtr existed_val;
     list<VPtr> to_release;
     {
       Mutex::Locker l(lock);
-      typename map<K, WeakVPtr>::iterator actual = weak_refs.lower_bound(key);
-      typename map<K, WeakVPtr>::iterator prev = actual;
-      if (actual != weak_refs.end()) {
-        ++actual;
-        if (actual != weak_refs.end() && actual->first == key) {
+      typename map<K, WeakVPtr>::iterator i = weak_refs.find(key);
+      if (i != weak_refs.end()) {
+        existed_val = i->second.lock();
+        if (existed_val){
           *existed = true;
-          return actual->second.lock();
+          lru_add(key, existed_val, &to_release);
+          return existed_val;
         }
       }
+        
       *existed = false;
-      weak_refs.insert(prev, make_pair(key, val));
+      VPtr val(value, Cleanup(this, key));
+      weak_refs.insert(make_pair(key, val));
       lru_add(key, val, &to_release);
+      return val;
     }
-    return val;
   }
 };
 
