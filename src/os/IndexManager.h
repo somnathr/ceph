@@ -52,8 +52,6 @@ class IndexManager {
   /// Currently in use CollectionIndices
   map<coll_t, Index > col_indices;
 
-  hash_map<coll_t, CollectionIndex*> col_indices_io_path;
-
   /**
    * Index factory
    *
