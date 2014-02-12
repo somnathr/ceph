@@ -280,7 +280,7 @@ void ThreadPoolSharded::worker(WorkThread *wt, int queue_index)
 
   wq->_lock_queue();
     
-  ldout(cct,10) << "worker start" << dendl;
+  ldout(cct,10) << "ThreadPoolSharded worker start" << dendl;
   
   std::stringstream ss;
   ss << name << " thread " << (void*)pthread_self();
@@ -299,6 +299,9 @@ void ThreadPoolSharded::worker(WorkThread *wt, int queue_index)
       wq->_lock_queue();
     }
 
+    ldout(cct,20) << "ThreadPoolSharded worker waiting" << dendl;
+    cct->get_heartbeat_map()->reset_timeout(hb, 4, 0);
+
     wq->_wait_on_queue();
 
     if (stop_io_thread.read() != 0){
@@ -308,7 +311,7 @@ void ThreadPoolSharded::worker(WorkThread *wt, int queue_index)
 
   }
 
-  ldout(cct,10) << "worker finish" << dendl;
+  ldout(cct,10) << "ThreadPoolSharded worker finish" << dendl;
 
   cct->get_heartbeat_map()->remove_worker(hb);
 
