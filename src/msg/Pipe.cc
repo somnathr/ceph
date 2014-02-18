@@ -1621,7 +1621,7 @@ void Pipe::writer()
 	  }
 	}
 
-	bufferlist blist = m->get_payload();
+	bufferlist& blist = m->get_payload();
 	blist.append(m->get_middle());
 	blist.append(m->get_data());
 
