@@ -3610,6 +3610,38 @@ void OSD::ms_handle_connect(Connection *con)
   }
 }
 
+void OSD::ms_handle_fast_connect(Connection *con)
+{
+  if (con->get_peer_type() != CEPH_ENTITY_TYPE_MON) {
+    Session *s = new Session;
+    con->set_priv(s->get());
+    s->con = con;
+    dout(10) << " new session (outgoing)" << s << " con=" << s->con
+        << " addr=" << s->con->get_peer_addr() << dendl;
+    // we don't connect to clients
+    assert(con->get_peer_type() == CEPH_ENTITY_TYPE_OSD);
+    s->entity_name.set_type(CEPH_ENTITY_TYPE_OSD);
+  }
+}
+
+void OSD::ms_handle_fast_accept(Connection *con)
+{
+  if (con->get_peer_type() != CEPH_ENTITY_TYPE_MON) {
+    Session *s = static_cast<Session*>(con->get_priv());
+    if (!s) {
+      s = new Session();
+      con->set_priv(s->get());
+      s->con = con;
+      dout(10) << "new session (incoming)" << s << " con=" << con
+          << " addr=" << con->get_peer_addr()
+          << " must have raced with connect" << dendl;
+      assert(con->get_peer_type() == CEPH_ENTITY_TYPE_OSD);
+      s->entity_name.set_type(CEPH_ENTITY_TYPE_OSD);
+    }
+    s->put();
+  }
+}
+
 bool OSD::ms_handle_reset(Connection *con)
 {
   OSD::Session *session = (OSD::Session *)con->get_priv();
@@ -4809,6 +4841,34 @@ bool OSD::ms_dispatch(Message *m)
   return true;
 }
 
+void OSD::dispatch_session_waiting(Session *session, OSDMapRef osdmap)
+{
+  for (list<OpRequestRef>::iterator i = session->waiting_on_map.begin();
+       i != session->waiting_on_map.end() && dispatch_op_fast(*i, osdmap);
+       session->waiting_on_map.erase(i++));
+
+  if (session->waiting_on_map.empty()) {
+    clear_session_waiting_on_map(session);
+  } else {
+    register_session_waiting_on_map(session);
+  }
+}
+
+void OSD::ms_fast_dispatch(Message *m)
+{
+  OpRequestRef op = op_tracker.create_request<OpRequest>(m);
+  OSDMapRef nextmap = service.get_nextmap_reserved();
+  Session *session = static_cast<Session*>(m->get_connection()->get_priv());
+  assert(session);
+  {
+    Mutex::Locker l(session->session_dispatch_lock);
+    session->waiting_on_map.push_back(op);
+    dispatch_session_waiting(session, nextmap);
+  }
+  session->put();
+  service.release_map(nextmap);
+}
+
 bool OSD::ms_get_authorizer(int dest_type, AuthAuthorizer **authorizer, bool force_new)
 {
   dout(10) << "OSD::ms_get_authorizer type=" << ceph_entity_type_name(dest_type) << dendl;
@@ -4995,56 +5055,57 @@ void OSD::dispatch_op(OpRequestRef op)
   case MSG_OSD_RECOVERY_RESERVE:
     handle_pg_recovery_reserve(op);
     break;
-  default:
-    epoch_t msg_epoch(op_required_epoch(op));
-    if (msg_epoch > osdmap->get_epoch())
-      return false;
-
-    switch(op->get_req()->get_type()) {
-    // client ops
-    case CEPH_MSG_OSD_OP:
-      handle_op(op, osdmap);
-      break;
-
-      // for replication etc.
-    case MSG_OSD_SUBOP:
-      handle_replica_op<MOSDSubOp, MSG_OSD_SUBOP>(op, osdmap);
-      break;
-    case MSG_OSD_SUBOPREPLY:
-      handle_replica_op<MOSDSubOpReply, MSG_OSD_SUBOPREPLY>(op, osdmap);
-      break;
-    case MSG_OSD_PG_PUSH:
-      handle_replica_op<MOSDPGPush, MSG_OSD_PG_PUSH>(op, osdmap);
-      break;
-    case MSG_OSD_PG_PULL:
-      handle_replica_op<MOSDPGPull, MSG_OSD_PG_PULL>(op, osdmap);
-      break;
-    case MSG_OSD_PG_PUSH_REPLY:
-      handle_replica_op<MOSDPGPushReply, MSG_OSD_PG_PUSH_REPLY>(op, osdmap);
-      break;
-    case MSG_OSD_PG_SCAN:
-      handle_replica_op<MOSDPGScan, MSG_OSD_PG_SCAN>(op, osdmap);
-      break;
-    case MSG_OSD_PG_BACKFILL:
-      handle_replica_op<MOSDPGBackfill, MSG_OSD_PG_BACKFILL>(op, osdmap);
-      break;
-    case MSG_OSD_EC_WRITE:
-      handle_replica_op<MOSDECSubOpWrite, MSG_OSD_EC_WRITE>(op, osdmap);
-      break;
-    case MSG_OSD_EC_WRITE_REPLY:
-      handle_replica_op<MOSDECSubOpWriteReply, MSG_OSD_EC_WRITE_REPLY>(op, osdmap);
-      break;
-    case MSG_OSD_EC_READ:
-      handle_replica_op<MOSDECSubOpRead, MSG_OSD_EC_READ>(op, osdmap);
-      break;
-    case MSG_OSD_EC_READ_REPLY:
-      handle_replica_op<MOSDECSubOpReadReply, MSG_OSD_EC_READ_REPLY>(op, osdmap);
-      break;
-    default:
-      assert(0);
-    }
-    break;
   }
+}
+
+bool OSD::dispatch_op_fast(OpRequestRef op, OSDMapRef osdmap) {
+  epoch_t msg_epoch(op_required_epoch(op));
+  if (msg_epoch > osdmap->get_epoch())
+    return false;
+
+  switch(op->get_req()->get_type()) {
+  // client ops
+  case CEPH_MSG_OSD_OP:
+    handle_op(op, osdmap);
+    break;
+    // for replication etc.
+  case MSG_OSD_SUBOP:
+    handle_replica_op<MOSDSubOp, MSG_OSD_SUBOP>(op, osdmap);
+    break;
+  case MSG_OSD_SUBOPREPLY:
+    handle_replica_op<MOSDSubOpReply, MSG_OSD_SUBOPREPLY>(op, osdmap);
+    break;
+  case MSG_OSD_PG_PUSH:
+    handle_replica_op<MOSDPGPush, MSG_OSD_PG_PUSH>(op, osdmap);
+    break;
+  case MSG_OSD_PG_PULL:
+    handle_replica_op<MOSDPGPull, MSG_OSD_PG_PULL>(op, osdmap);
+    break;
+  case MSG_OSD_PG_PUSH_REPLY:
+    handle_replica_op<MOSDPGPushReply, MSG_OSD_PG_PUSH_REPLY>(op, osdmap);
+    break;
+  case MSG_OSD_PG_SCAN:
+    handle_replica_op<MOSDPGScan, MSG_OSD_PG_SCAN>(op, osdmap);
+    break;
+  case MSG_OSD_PG_BACKFILL:
+    handle_replica_op<MOSDPGBackfill, MSG_OSD_PG_BACKFILL>(op, osdmap);
+    break;
+  case MSG_OSD_EC_WRITE:
+    handle_replica_op<MOSDECSubOpWrite, MSG_OSD_EC_WRITE>(op, osdmap);
+    break;
+  case MSG_OSD_EC_WRITE_REPLY:
+    handle_replica_op<MOSDECSubOpWriteReply, MSG_OSD_EC_WRITE_REPLY>(op, osdmap);
+    break;
+  case MSG_OSD_EC_READ:
+    handle_replica_op<MOSDECSubOpRead, MSG_OSD_EC_READ>(op, osdmap);
+    break;
+  case MSG_OSD_EC_READ_REPLY:
+    handle_replica_op<MOSDECSubOpReadReply, MSG_OSD_EC_READ_REPLY>(op, osdmap);
+    break;
+  default:
+    assert(0);
+  }
+  return true;
 }
 
 void OSD::_dispatch(Message *m)
@@ -5981,6 +6042,16 @@ void OSD::consume_map()
   service.pre_publish_map(osdmap);
   service.await_reserved_maps();
   service.publish_map(osdmap);
+
+  set<Session*> sessions_to_check;
+  get_sessions_waiting_for_map(&sessions_to_check);
+  for (set<Session*>::iterator i = sessions_to_check.begin();
+       i != sessions_to_check.end();
+       sessions_to_check.erase(i++)) {
+    Mutex::Locker l((*i)->session_dispatch_lock);
+    dispatch_session_waiting(*i, osdmap);
+    (*i)->put();
+  }
 
   // scan pg's
   {
@@ -7573,6 +7644,7 @@ void OSD::handle_op(OpRequestRef op, OSDMapRef osdmap)
       return;
     }
   }
+
   // calc actual pgid
   pg_t _pgid = m->get_pg();
   int64_t pool = _pgid.pool();
