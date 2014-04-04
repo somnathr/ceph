@@ -69,7 +69,20 @@ public:
    * @param m The Message to fast dispatch.
    */
   virtual void ms_fast_dispatch(Message *m) { assert(0); }
-
+  /**
+   * Let the Dispatcher preview a Message before it is dispatched. This
+   * function is called on *every* Message, prior to the fast/regular dispatch
+   * decision point, but it is only used on fast-dispatch capable systems. An
+   * implementation of ms_fast_preprocess must be essentially lock-free in the
+   * same way as the ms_fast_dispatch function is. Messages are delivered in
+   * receipt order within a single Connection, but there are no guarantees across
+   * Connections. This makes it useful for some limited coordination between
+   * Messages which can be fast_dispatch'ed and those which must go through
+   * normal dispatch.
+   *
+   * @param m A message which has been received
+   */
+  virtual void ms_fast_preprocess(Message *m) {}
   /**
    * The Messenger calls this function to deliver a single message.
    *

@@ -611,6 +611,16 @@ public:
     assert(0);
   }
   /**
+   *
+   */
+  void ms_fast_preprocess(Message *m) {
+    for (list<Dispatcher*>::iterator p = fast_dispatchers.begin();
+	 p != fast_dispatchers.end();
+	 ++p) {
+      (*p)->ms_fast_preprocess(m);
+    }
+  }
+  /**
    *  Deliver a single Message. Send it to each Dispatcher
    *  in sequence until one of them handles it.
    *  If none of our Dispatchers can handle it, assert(0).

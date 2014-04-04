@@ -1521,6 +1521,7 @@ void Pipe::reader()
       ldout(msgr->cct,10) << "reader got message "
 	       << m->get_seq() << " " << m << " " << *m
 	       << dendl;
+      in_q->fast_preprocess(m);
 
       if (delay_thread) {
         utime_t release;

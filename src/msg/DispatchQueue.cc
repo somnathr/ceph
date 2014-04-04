@@ -72,6 +72,10 @@ void DispatchQueue::fast_dispatch(Message *m)
   post_dispatch(m, msize);
 }
 
+void DispatchQueue::fast_preprocess(Message *m)
+{
+  msgr->ms_fast_preprocess(m);
+}
 
 void DispatchQueue::enqueue(Message *m, int priority, uint64_t id)
 {
