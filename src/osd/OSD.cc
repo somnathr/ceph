@@ -5074,8 +5074,15 @@ void OSD::dispatch_op(OpRequestRef op)
 
 bool OSD::dispatch_op_fast(OpRequestRef op, OSDMapRef osdmap) {
   epoch_t msg_epoch(op_required_epoch(op));
-  if (msg_epoch > osdmap->get_epoch())
+  if (msg_epoch > osdmap->get_epoch()) {
+    Session *s = static_cast<Session*>(op->get_req()->
+				       get_connection()->get_priv());
+    if (s->received_map_epoch < msg_epoch) {
+      osdmap_subscribe(msg_epoch, false);
+    }
+    s->put();
     return false;
+  }
 
   switch(op->get_req()->get_type()) {
   // client ops
