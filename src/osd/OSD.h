@@ -1001,12 +1001,13 @@ public:
 
     Mutex sent_epoch_lock;
     epoch_t last_sent_epoch;
+    epoch_t received_map_epoch; // largest epoch seen in MOSDMap from here
 
     Session() :
       auid(-1), con(0),
       session_dispatch_lock("Session::session_dispatch_lock"),
       sent_epoch_lock("Session::sent_epoch_lock"),
-      last_sent_epoch(0)
+      last_sent_epoch(0), received_map_epoch(0)
     {}
   };
   void dispatch_session_waiting(Session *session, OSDMapRef osdmap);
@@ -1973,6 +1974,7 @@ protected:
     }
   }
   void ms_fast_dispatch(Message *m);
+  void ms_fast_preprocess(Message *m);
   bool ms_dispatch(Message *m);
   bool ms_get_authorizer(int dest_type, AuthAuthorizer **authorizer, bool force_new);
   bool ms_verify_authorizer(Connection *con, int peer_type,
