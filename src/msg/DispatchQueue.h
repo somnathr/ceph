@@ -111,6 +111,7 @@ class DispatchQueue {
 
   public:
   bool stop;
+  Mutex local_delivery_lock;
   void local_delivery(Message *m, int priority);
 
   double get_max_age(utime_t now);
@@ -183,7 +184,8 @@ class DispatchQueue {
 	     cct->_conf->ms_pq_min_cost),
       next_pipe_id(1),
       dispatch_thread(this),
-      stop(false)
+      stop(false),
+      local_delivery_lock("SimpleMessenger::DispatchQueue::local_delivery_lock")
     {}
 };
 

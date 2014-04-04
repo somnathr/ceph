@@ -95,18 +95,23 @@ void DispatchQueue::enqueue(Message *m, int priority, uint64_t id)
 
 void DispatchQueue::local_delivery(Message *m, int priority)
 {
-  Mutex::Locker l(lock);
   m->set_connection(msgr->local_connection.get());
   m->set_recv_stamp(ceph_clock_now(msgr->cct));
-  add_arrival(m);
-  if (priority >= CEPH_MSG_PRIO_LOW) {
-    mqueue.enqueue_strict(
-      0, priority, QueueItem(m));
+  if (can_fast_dispatch(m)) {
+    Mutex::Locker l(local_delivery_lock);
+    fast_dispatch(m);
   } else {
-    mqueue.enqueue(
-      0, priority, m->get_cost(), QueueItem(m));
+    Mutex::Locker l(lock);
+    add_arrival(m);
+    if (priority >= CEPH_MSG_PRIO_LOW) {
+      mqueue.enqueue_strict(
+          0, priority, QueueItem(m));
+    } else {
+      mqueue.enqueue(
+          0, priority, m->get_cost(), QueueItem(m));
+    }
+    cond.Signal();
   }
-  cond.Signal();
 }
 
 /*
