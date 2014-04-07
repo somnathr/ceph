@@ -196,7 +196,11 @@ void Pipe::DelayedDelivery::flush()
   while (!delay_queue.empty()) {
     Message *m = delay_queue.front().second;
     delay_queue.pop_front();
-    pipe->in_q->enqueue(m, m->get_priority(), pipe->conn_id);
+    if (pipe->in_q->can_fast_dispatch(m)) {
+      pipe->in_q->fast_dispatch(m);
+    } else {
+      pipe->in_q->enqueue(m, m->get_priority(), pipe->conn_id);
+    }
   }
 }
 
