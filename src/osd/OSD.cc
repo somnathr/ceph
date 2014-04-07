@@ -6071,8 +6071,9 @@ void OSD::consume_map()
   for (set<Session*>::iterator i = sessions_to_check.begin();
        i != sessions_to_check.end();
        sessions_to_check.erase(i++)) {
-    Mutex::Locker l((*i)->session_dispatch_lock);
+    (*i)->session_dispatch_lock.Lock();
     dispatch_session_waiting(*i, osdmap);
+    (*i)->session_dispatch_lock.Unlock();
     (*i)->put();
   }
 
