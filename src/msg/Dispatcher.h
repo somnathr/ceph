@@ -74,11 +74,13 @@ public:
    * function is called on *every* Message, prior to the fast/regular dispatch
    * decision point, but it is only used on fast-dispatch capable systems. An
    * implementation of ms_fast_preprocess must be essentially lock-free in the
-   * same way as the ms_fast_dispatch function is. Messages are delivered in
-   * receipt order within a single Connection, but there are no guarantees across
-   * Connections. This makes it useful for some limited coordination between
-   * Messages which can be fast_dispatch'ed and those which must go through
-   * normal dispatch.
+   * same way as the ms_fast_dispatch function is (in particular, ms_fast_preprocess
+   * may be called while the Messenger holds internal locks that prevent progress from
+   * other threads, so any locks it takes must be at the very bottom of the hierarchy).
+   * Messages are delivered in receipt order within a single Connection, but there are
+   * no guarantees across Connections. This makes it useful for some limited
+   * coordination between Messages which can be fast_dispatch'ed and those which must
+   * go through normal dispatch.
    *
    * @param m A message which has been received
    */
