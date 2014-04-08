@@ -1001,13 +1001,14 @@ public:
 
     Mutex sent_epoch_lock;
     epoch_t last_sent_epoch;
+    Mutex received_map_lock;
     epoch_t received_map_epoch; // largest epoch seen in MOSDMap from here
 
     Session() :
       auid(-1), con(0),
       session_dispatch_lock("Session::session_dispatch_lock"),
-      sent_epoch_lock("Session::sent_epoch_lock"),
-      last_sent_epoch(0), received_map_epoch(0)
+      sent_epoch_lock("Session::sent_epoch_lock"), last_sent_epoch(0),
+      received_map_lock("Session::received_map_lock"), received_map_epoch(0)
     {}
   };
   void dispatch_session_waiting(Session *session, OSDMapRef osdmap);
