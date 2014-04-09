@@ -444,7 +444,9 @@ void SimpleMessenger::submit_message(Message *m, Connection *con,
   if (my_inst.addr == dest_addr) {
     // local
     ldout(cct,20) << "submit_message " << *m << " local" << dendl;
+    lock.Unlock();
     dispatch_queue.local_delivery(m, m->get_priority());
+    lock.Lock();
     return;
   }
 
