@@ -6356,11 +6356,13 @@ bool OSD::require_same_or_newer_map(OpRequestRef op, epoch_t epoch)
       ConnectionRef con = m->get_connection();
       cluster_messenger->mark_down(con.get());
       Session *s = static_cast<Session*>(con->get_priv());
-      s->session_dispatch_lock.Lock();
-      clear_session_waiting_on_map(s);
-      con->set_priv(NULL);   // break ref <-> session cycle, if any
-      s->session_dispatch_lock.Unlock();
-      s->put();
+      if (s) {
+	s->session_dispatch_lock.Lock();
+	clear_session_waiting_on_map(s);
+	con->set_priv(NULL);   // break ref <-> session cycle, if any
+	s->session_dispatch_lock.Unlock();
+	s->put();
+      }
       return false;
     }
   }
