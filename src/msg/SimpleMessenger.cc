@@ -397,6 +397,7 @@ ConnectionRef SimpleMessenger::get_loopback_connection()
 void SimpleMessenger::submit_message(Message *m, Connection *con,
 				     const entity_addr_t& dest_addr, int dest_type, bool lazy)
 {
+  bool lock_held = true;
 
   if (cct->_conf->ms_dump_on_send) {
     m->encode(-1, true);
@@ -436,18 +437,29 @@ void SimpleMessenger::submit_message(Message *m, Connection *con,
       m->put();
       return;
     }
+    else {
+	lock_held = false;
+    }
   }
 
+  
   // local?
   if (my_inst.addr == dest_addr) {
     // local
     ldout(cct,20) << "submit_message " << *m << " local" << dendl;
-    lock.Unlock();
+    if (lock_held) {
+      lock.Unlock();
+    }
     dispatch_queue.local_delivery(m, m->get_priority());
-    lock.Lock();
+    if (lock_held) {
+      lock.Lock();
+    }
     return;
   }
 
+  if (!lock_held) {
+    lock.Lock();
+  }
   // remote, no existing pipe.
   const Policy& policy = get_policy(dest_type);
   if (policy.server) {
@@ -460,6 +472,9 @@ void SimpleMessenger::submit_message(Message *m, Connection *con,
   } else {
     ldout(cct,20) << "submit_message " << *m << " remote, " << dest_addr << ", new pipe." << dendl;
     connect_rank(dest_addr, dest_type, con, m);
+  }
+  if (!lock_held) {
+    lock.Unlock();
   }
 }
 

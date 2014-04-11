@@ -3491,7 +3491,7 @@ bool FileStore::debug_mdata_eio(const ghobject_t &oid) {
 
 // objects
 
-int FileStore::getattr(coll_t cid, const ghobject_t& oid, const char *name, bufferptr &bp, bool io_path)
+int FileStore::getattr(coll_t cid, const ghobject_t& oid, const char *name, bufferptr &bp)
 {
   dout(15) << "getattr " << cid << "/" << oid << " '" << name << "'" << dendl;
   int r;
@@ -3502,15 +3502,9 @@ int FileStore::getattr(coll_t cid, const ghobject_t& oid, const char *name, buff
     goto out;
   }
   
-  if (!io_path){
-    char n[CHAIN_XATTR_MAX_NAME_LEN];
-    get_attrname(name, n, CHAIN_XATTR_MAX_NAME_LEN);
-    r = _fgetattr(**outfd, n, bp);
-
-  }else {
-    r = _fgetattr(**outfd, name, bp);
-    
-  }
+  char n[CHAIN_XATTR_MAX_NAME_LEN];
+  get_attrname(name, n, CHAIN_XATTR_MAX_NAME_LEN);
+  r = _fgetattr(**outfd, n, bp);
 
   if (r == -ENODATA) {
     map<string, bufferlist> got;

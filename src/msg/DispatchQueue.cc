@@ -90,6 +90,7 @@ void DispatchQueue::enqueue(Message *m, int priority, uint64_t id)
     mqueue.enqueue(
         id, priority, m->get_cost(), QueueItem(m));
   }
+  cond.Signal();
 }
 
 void DispatchQueue::local_delivery(Message *m, int priority)

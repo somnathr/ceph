@@ -2028,7 +2028,6 @@ PG *OSD::get_pg_or_queue_for_pg(spg_t pgid, OpRequestRef op)
 
 bool OSD::_have_pg(spg_t pgid)
 {
-  RWLock::RLocker l(pg_map_lock);
   assert(osd_lock.is_locked());
   RWLock::RLocker l(pg_map_lock);
   return pg_map.count(pgid);
@@ -3610,16 +3609,6 @@ void OSD::do_mon_report()
   send_pg_stats(now);
 }
 
-void OSD::ms_handle_accept(Connection *con)
-{
-  Session *s = static_cast<Session *>(con->get_priv());
-  if (!s) {
-    s = new Session;
-    con->set_priv(s->get());
-    s->con = con;
-    dout(10) << " new session " << s << " con=" << s->con << " addr=" << s->con->get_peer_addr() << dendl;
-  }
-}
 
 void OSD::ms_handle_connect(Connection *con)
 {
@@ -5117,7 +5106,7 @@ void OSD::dispatch_op(OpRequestRef op)
   }
 }
 
-bool OSD::dispatch_op_fast(OpRequestRef op, OSDMapRef osdmap) {
+bool OSD::dispatch_op_fast(const OpRequestRef& op, const OSDMapRef& osdmap) {
   epoch_t msg_epoch(op_required_epoch(op));
   if (msg_epoch > osdmap->get_epoch()) {
     Session *s = static_cast<Session*>(op->get_req()->
@@ -6070,20 +6059,6 @@ void OSD::consume_map()
 
   int num_pg_primary = 0, num_pg_replica = 0, num_pg_stray = 0;
   list<PGRef> to_remove;
-  {
-    RWLock::RLocker l(pg_map_lock);
-    // scan pg's
-    for (hash_map<pg_t,PG*>::iterator it = pg_map.begin();
-	 it != pg_map.end();
-	 ++it) {
-      PG *pg = it->second;
-      pg->lock();
-      if (pg->is_primary())
-	num_pg_primary++;
-      else if (pg->is_replica())
-	num_pg_replica++;
-      else
-	num_pg_stray++;
 
   // scan pg's
   {
@@ -7653,7 +7628,7 @@ struct send_map_on_destruct {
   }
 };
 
-void OSD::handle_op(OpRequestRef op, OSDMapRef osdmap)
+void OSD::handle_op(const OpRequestRef& op, OSDMapRef osdmap)
 {
   MOSDOp *m = static_cast<MOSDOp*>(op->get_req());
   assert(m->get_header().type == CEPH_MSG_OSD_OP);

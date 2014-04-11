@@ -498,7 +498,7 @@ public:
   int snapshot(const string& name);
 
   // attrs
-  int getattr(coll_t cid, const ghobject_t& oid, const char *name, bufferptr &bp, bool io_path = false);
+  int getattr(coll_t cid, const ghobject_t& oid, const char *name, bufferptr &bp);
   int getattrs(coll_t cid, const ghobject_t& oid, map<string,bufferptr>& aset, bool user_only = false);
 
   int _setattrs(coll_t cid, const ghobject_t& oid, map<string,bufferptr>& aset,

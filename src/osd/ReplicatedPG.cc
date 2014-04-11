@@ -6871,7 +6871,8 @@ ObjectContextRef ReplicatedPG::create_object_context(const object_info_t& oi,
 
 ObjectContextRef ReplicatedPG::get_object_context(const hobject_t& soid,
 						  bool can_create,
-						  map<string, bufferlist> *attrs)
+						  map<string, bufferlist> *attrs,
+						  bool need_snap)
 {
   assert(
     attrs || !pg_log.get_missing().is_missing(soid) ||
@@ -6927,11 +6928,9 @@ ObjectContextRef ReplicatedPG::get_object_context(const hobject_t& soid,
     obc->obs.oi = oi;
     obc->obs.exists = true;
 
-    if (need_snap)
-    {
+    if (need_snap){
       obc->ssc = get_snapset_context(
-                soid.oid, soid.get_key(), soid.hash,
-                true, soid.get_namespace(),
+                soid, true,
                 soid.has_snapset() ? attrs : 0);
     }
 
@@ -6951,7 +6950,9 @@ ObjectContextRef ReplicatedPG::get_object_context(const hobject_t& soid,
     dout(10) << __func__ << ": creating obc from disk: " << obc
 	     << dendl;
   }
-  assert(obc->ssc);
+  if (need_snap){
+  	assert(obc->ssc);
+  }
   dout(10) << __func__ << ": " << obc << " " << soid
 	   << " " << obc->rwstate
 	   << " oi: " << obc->obs.oi
@@ -7024,7 +7025,14 @@ int ReplicatedPG::find_object_context(const hobject_t& oid,
 
   // want the head?
   if (oid.snap == CEPH_NOSNAP) {
-    ObjectContextRef obc = get_object_context(head, can_create);
+    bool need_snap = true;
+
+    if (!can_create){
+      need_snap = false;
+    }
+
+    ObjectContextRef obc = get_object_context(head, can_create, NULL,  need_snap);
+
     if (!obc) {
       if (pmissing)
 	*pmissing = head;
@@ -7223,7 +7231,7 @@ SnapSetContext *ReplicatedPG::get_snapset_context(
 {
   SnapSetContext *ssc;
   snapset_contexts_lock.Lock();
-  map<object_t, SnapSetContext*>::iterator p = snapset_contexts.find(oid);
+  map<hobject_t, SnapSetContext*>::iterator p = snapset_contexts.find(oid.get_snapdir());
   if (p != snapset_contexts.end()) {
     ssc = p->second;
     snapset_contexts_lock.Unlock();
@@ -7242,7 +7250,7 @@ SnapSetContext *ReplicatedPG::get_snapset_context(
       assert(attrs->count(SS_ATTR));
       bv = attrs->find(SS_ATTR)->second;
     }
-    ssc = new SnapSetContext(oid);
+    ssc = new SnapSetContext(oid.get_snapdir());
     snapset_contexts_lock.Lock();
     _register_snapset_context(ssc);
     snapset_contexts_lock.Unlock();
