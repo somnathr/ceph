@@ -1524,6 +1524,7 @@ void Pipe::reader()
       in_seq = m->get_seq();
 
       cond.Signal();  // wake up writer, to ack this
+      pipe_lock.Unlock();
       
       ldout(msgr->cct,10) << "reader got message "
 	       << m->get_seq() << " " << m << " " << *m
@@ -1540,13 +1541,14 @@ void Pipe::reader()
         delay_thread->queue(release, m);
       } else {
         if (in_q->can_fast_dispatch(m)) {
-          pipe_lock.Unlock();
+          //pipe_lock.Unlock();
           in_q->fast_dispatch(m);
-          pipe_lock.Lock();
+          //pipe_lock.Lock();
         } else {
           in_q->enqueue(m, m->get_priority(), conn_id);
         }
       }
+      pipe_lock.Lock();
     }
     
     else if (tag == CEPH_MSGR_TAG_CLOSE) {
