@@ -6945,13 +6945,21 @@ ObjectContextRef ReplicatedPG::get_object_context(const hobject_t& soid,
 	     << dendl;
   }
   if (need_snap){
-  	assert(obc->ssc);
-  }
-  dout(10) << __func__ << ": " << obc << " " << soid
+    assert(obc->ssc);
+  
+    dout(10) << __func__ << ": " << obc << " " << soid
 	   << " " << obc->rwstate
 	   << " oi: " << obc->obs.oi
-	   << " ssc: " << obc->ssc
-	   << " snapset: " << obc->ssc->snapset << dendl;
+	   << " ssc: " << obc->ssc 
+	   << " snapset: " << obc->ssc->snapset  << dendl;
+  } else {
+
+    dout(10) << __func__ << ": " << obc << " " << soid
+           << " " << obc->rwstate
+           << " oi: " << obc->obs.oi << dendl;
+  }
+
+
   return obc;
 }
 
