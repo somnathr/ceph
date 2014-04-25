@@ -200,14 +200,14 @@ public:
   virtual int _split(
     uint32_t match,                             //< [in] value to match
     uint32_t bits,                              //< [in] bits to check
-    ceph::shared_ptr<CollectionIndex> dest  //< [in] destination index
+    CollectionIndex* dest  //< [in] destination index
     ) = 0;
   
   /// @see CollectionIndex
   int split(
     uint32_t match,
     uint32_t bits,
-    ceph::shared_ptr<CollectionIndex> dest
+    CollectionIndex* dest
     ) {
     WRAP_RETRY(
       r = _split(match, bits, dest);
