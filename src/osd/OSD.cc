@@ -2026,7 +2026,7 @@ PG *OSD::_create_lock_pg(
   return pg;
 }
 
-PG *OSD::get_pg_or_queue_for_pg(spg_t pgid, OpRequestRef op)
+PG *OSD::get_pg_or_queue_for_pg(const spg_t& pgid, OpRequestRef& op)
 {
   {
     RWLock::RLocker l(pg_map_lock);
@@ -5155,7 +5155,7 @@ void OSD::dispatch_op(OpRequestRef op)
   }
 }
 
-bool OSD::dispatch_op_fast(OpRequestRef op, OSDMapRef osdmap) {
+bool OSD::dispatch_op_fast(OpRequestRef& op, OSDMapRef& osdmap) {
   if (is_stopping()) {
     // we're shutting down, so drop the op
     return true;
@@ -7747,7 +7747,7 @@ struct send_map_on_destruct {
   }
 };
 
-void OSD::handle_op(OpRequestRef op, OSDMapRef osdmap)
+void OSD::handle_op(OpRequestRef& op, OSDMapRef& osdmap)
 {
   MOSDOp *m = static_cast<MOSDOp*>(op->get_req());
   assert(m->get_header().type == CEPH_MSG_OSD_OP);
@@ -7895,7 +7895,7 @@ void OSD::handle_op(OpRequestRef op, OSDMapRef osdmap)
 }
 
 template<typename T, int MSGTYPE>
-void OSD::handle_replica_op(OpRequestRef op, OSDMapRef osdmap)
+void OSD::handle_replica_op(OpRequestRef& op, OSDMapRef& osdmap)
 {
   T *m = static_cast<T *>(op->get_req());
   assert(m->get_header().type == MSGTYPE);
@@ -7953,7 +7953,7 @@ bool OSD::op_is_discardable(MOSDOp *op)
   return false;
 }
 
-void OSD::enqueue_op(PG *pg, OpRequestRef op)
+void OSD::enqueue_op(PG *pg, OpRequestRef& op)
 {
   utime_t latency = ceph_clock_now(cct) - op->get_req()->get_recv_stamp();
   dout(15) << "enqueue_op " << op << " prio " << op->get_req()->get_priority()
@@ -8246,7 +8246,7 @@ void OSD::handle_conf_change(const struct md_config_t *conf,
 
 // --------------------------------
 
-int OSD::init_op_flags(OpRequestRef op)
+int OSD::init_op_flags(OpRequestRef& op)
 {
   MOSDOp *m = static_cast<MOSDOp*>(op->get_req());
   vector<OSDOp>::iterator iter;
