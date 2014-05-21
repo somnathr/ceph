@@ -48,8 +48,8 @@ class MOSDOpReply : public Message {
   request_redirect_t redirect;
 
 public:
-  object_t get_oid() const { return oid; }
-  pg_t     get_pg() const { return pgid; }
+  const object_t& get_oid() const { return oid; }
+  const pg_t&     get_pg() const { return pgid; }
   int      get_flags() const { return flags; }
 
   bool     is_ondisk() const { return get_flags() & CEPH_OSD_FLAG_ONDISK; }

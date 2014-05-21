@@ -949,7 +949,7 @@ protected:
   void tick();
   void _dispatch(Message *m);
   void dispatch_op(OpRequestRef op);
-  bool dispatch_op_fast(OpRequestRef op, OSDMapRef osdmap);
+  bool dispatch_op_fast(OpRequestRef& op, OSDMapRef& osdmap);
 
   void check_osdmap_features(ObjectStore *store);
 
@@ -1421,7 +1421,7 @@ private:
   } op_shardedwq;
 
 
-  void enqueue_op(PG *pg, OpRequestRef op);
+  void enqueue_op(PG *pg, OpRequestRef& op);
   void dequeue_op(
     PGRef pg, OpRequestRef op,
     ThreadPool::TPHandle &handle);
@@ -1548,7 +1548,7 @@ protected:
 
   PGPool _get_pool(int id, OSDMapRef createmap);
 
-  PG *get_pg_or_queue_for_pg(spg_t pgid, OpRequestRef op);
+  PG *get_pg_or_queue_for_pg(const spg_t& pgid, OpRequestRef& op);
   bool  _have_pg(spg_t pgid);
   PG   *_lookup_lock_pg_with_map_lock_held(spg_t pgid);
   PG   *_lookup_lock_pg(spg_t pgid);
@@ -2206,10 +2206,10 @@ public:
   void handle_rep_scrub(MOSDRepScrub *m);
   void handle_scrub(struct MOSDScrub *m);
   void handle_osd_ping(class MOSDPing *m);
-  void handle_op(OpRequestRef op, OSDMapRef osdmap);
+  void handle_op(OpRequestRef& op, OSDMapRef& osdmap);
 
   template <typename T, int MSGTYPE>
-  void handle_replica_op(OpRequestRef op, OSDMapRef osdmap);
+  void handle_replica_op(OpRequestRef& op, OSDMapRef& osdmap);
 
   /// check if we can throw out op from a disconnected client
   static bool op_is_discardable(class MOSDOp *m);
@@ -2217,7 +2217,7 @@ public:
 public:
   void force_remount();
 
-  int init_op_flags(OpRequestRef op);
+  int init_op_flags(OpRequestRef& op);
 
   OSDService service;
   friend class OSDService;
