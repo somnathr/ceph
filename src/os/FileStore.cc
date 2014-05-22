@@ -222,6 +222,13 @@ int FileStore::lfn_open(coll_t cid,
 	 ( oid.shard_id == ghobject_t::NO_SHARD &&
 	   oid.generation == ghobject_t::NO_GEN ));
   assert(outfd);
+
+  if (!replaying) {
+    *outfd = fdcache.lookup(oid);
+    if (*outfd)
+      return 0;
+  }
+
   int flags = O_RDWR;
   if (create)
     flags |= O_CREAT;
@@ -235,12 +242,6 @@ int FileStore::lfn_open(coll_t cid,
   }
 
   int fd, exist;
-  if (!replaying) {
-    Mutex::Locker l(fdcache_lock);
-    *outfd = fdcache.lookup(oid);
-    if (*outfd)
-      return 0;
-  }
 
   {
     IndexedPath path2;
@@ -279,7 +280,6 @@ int FileStore::lfn_open(coll_t cid,
   }
 
   if (!replaying) {
-    Mutex::Locker l(fdcache_lock);
     *outfd = fdcache.lookup(oid);
     if (*outfd) {
       VOID_TEMP_FAILURE_RETRY(::close(fd));
@@ -366,7 +366,6 @@ int FileStore::lfn_unlink(coll_t cid, const ghobject_t& o,
   int r = get_index(cid, &index);
   if (r < 0)
     return r;
-  Mutex::Locker l(fdcache_lock);
   {
     IndexedPath path;
     int exist;
@@ -426,7 +425,6 @@ FileStore::FileStore(const std::string &base, const std::string &jdev, const cha
   sync_entry_timeo_lock("sync_entry_timeo_lock"),
   timer(g_ceph_context, sync_entry_timeo_lock),
   stop(false), sync_thread(this),
-  fdcache_lock("fdcache_lock"),
   fdcache(g_ceph_context),
   wbthrottle(g_ceph_context),
   default_osr("default"),

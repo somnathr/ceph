@@ -259,7 +259,6 @@ private:
 
   friend ostream& operator<<(ostream& out, const OpSequencer& s);
 
-  Mutex fdcache_lock;
   FDCache fdcache;
   WBThrottle wbthrottle;
 
