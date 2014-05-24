@@ -147,9 +147,7 @@ int FileStore::get_cdir(coll_t cid, char *s, int len)
 
 int FileStore::get_index(coll_t cid, Index *index)
 {
-  char path[PATH_MAX];
-  get_cdir(cid, path, sizeof(path));
-  int r = index_manager.get_index(cid, path, index);
+  int r = index_manager.get_index(cid, basedir, index);
   assert(!m_filestore_fail_eio || r != -EIO);
   return r;
 }
@@ -232,7 +230,8 @@ int FileStore::lfn_open(coll_t cid,
   int flags = O_RDWR;
   if (create)
     flags |= O_CREAT;
-  Index index2;
+
+  Index index2 = NULL;
   if (!index) {
     index = &index2;
   }
@@ -252,7 +251,10 @@ int FileStore::lfn_open(coll_t cid,
 	   << ": " << cpp_strerror(-r) << dendl;
       goto fail;
     }
-    r = (*index)->lookup(oid, path, &exist);
+    {
+      RWLock::RLocker read_lock((*index)->access_lock);
+      r = (*index)->lookup(oid, path, &exist);
+    }
     if (r < 0) {
       derr << "could not find " << oid << " in index: "
 	   << cpp_strerror(-r) << dendl;
@@ -269,7 +271,11 @@ int FileStore::lfn_open(coll_t cid,
     fd = r;
 
     if (create && (!exist)) {
-      r = (*index)->created(oid, (*path)->path());
+
+      {
+        RWLock::WLocker write_lock((*index)->access_lock);
+        r = (*index)->created(oid, (*path)->path());
+      }
       if (r < 0) {
 	VOID_TEMP_FAILURE_RETRY(::close(fd));
 	derr << "error creating " << oid << " (" << (*path)->path()
