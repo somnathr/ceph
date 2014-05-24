@@ -7056,6 +7056,8 @@ ObjectContextRef ReplicatedPG::get_object_context(const hobject_t& soid,
     (pg_log.get_log().objects.count(soid) &&
       pg_log.get_log().objects.find(soid)->second->op ==
       pg_log_entry_t::LOST_REVERT));
+
+  bool need_snap = true;
   ObjectContextRef obc = object_contexts.lookup(soid);
   if (obc) {
     dout(10) << __func__ << ": found obc in cache: " << obc
@@ -7102,11 +7104,16 @@ ObjectContextRef ReplicatedPG::get_object_context(const hobject_t& soid,
     obc->destructor_callback = new C_PG_ObjectContext(this, obc.get());
     obc->obs.oi = oi;
     obc->obs.exists = true;
-
-    obc->ssc = get_snapset_context(
-      soid, true,
-      soid.has_snapset() ? attrs : 0);
-    register_snapset_context(obc->ssc);
+    if (soid.snap == CEPH_NOSNAP) {
+      if (!can_create)
+        need_snap = false;
+    }
+    if (need_snap) {
+      obc->ssc = get_snapset_context(
+        soid, true,
+        soid.has_snapset() ? attrs : 0);
+    }
+    //register_snapset_context(obc->ssc);
 
     populate_obc_watchers(obc);
 
@@ -7124,12 +7131,20 @@ ObjectContextRef ReplicatedPG::get_object_context(const hobject_t& soid,
     dout(10) << __func__ << ": creating obc from disk: " << obc
 	     << dendl;
   }
-  assert(obc->ssc);
-  dout(10) << __func__ << ": " << obc << " " << soid
+  if (need_snap) {
+    assert(obc->ssc);
+    dout(10) << __func__ << ": " << obc << " " << soid
 	   << " " << obc->rwstate
 	   << " oi: " << obc->obs.oi
 	   << " ssc: " << obc->ssc
 	   << " snapset: " << obc->ssc->snapset << dendl;
+  } else {
+
+    dout(10) << __func__ << ": " << obc << " " << soid
+           << " " << obc->rwstate
+           << " oi: " << obc->obs.oi <<dendl;
+  }
+
   return obc;
 }
 
@@ -7198,6 +7213,7 @@ int ReplicatedPG::find_object_context(const hobject_t& oid,
 
   // want the head?
   if (oid.snap == CEPH_NOSNAP) {
+
     ObjectContextRef obc = get_object_context(head, can_create);
     if (!obc) {
       if (pmissing)
