@@ -121,7 +121,8 @@ int IndexManager::build_index(coll_t c, const char *path, Index *index) {
 
 int IndexManager::get_index(coll_t c, const string& baseDir, Index *index) {
   Mutex::Locker l(lock);
-  if (!col_indices.count(c)) {
+  map<coll_t, Index > ::iterator it = col_indices.find(c);
+  if (it == col_indices.end()) {
     char path[PATH_MAX];
     snprintf(path, sizeof(path), "%s/current/%s", baseDir.c_str(), c.to_str().c_str());
     int r = build_index(c, path, index);
@@ -130,7 +131,7 @@ int IndexManager::get_index(coll_t c, const string& baseDir, Index *index) {
     (*index)->set_ref(*index);
     col_indices[c] = (*index);
   } else {
-    *index = col_indices[c];
+    *index = it->second;
   }
   return 0;
 }
