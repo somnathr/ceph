@@ -2914,7 +2914,7 @@ int FileStore::_clone(coll_t cid, const ghobject_t& oldoid, const ghobject_t& ne
   int r;
   FDRef o, n;
   {
-    Index index;
+    Index index = NULL;
     IndexedPath from, to;
     r = lfn_open(cid, oldoid, false, &o, &from, &index);
     if (r < 0) {
