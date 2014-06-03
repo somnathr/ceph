@@ -390,6 +390,7 @@ void ShardedThreadPool::drain()
     wait_cond.Wait(shardedpool_lock);
   }
   drain_threads.set(0);
+  shardedpol_cond.Signal();
   shardedpool_lock.Unlock();
   ldout(cct,10) << "drained" << dendl;
 }
