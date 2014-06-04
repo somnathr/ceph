@@ -76,6 +76,13 @@ protected:
 		      int *exists		 
 		      ) { return 0; }
 
+  virtual int _lookup(
+    const ghobject_t &oid,
+    string& full_path,
+    string* mangled_name = NULL) { return 0; }
+ 
+ 
+
   virtual int _collection_list(
 			       vector<ghobject_t> *ls
 			       ) { return 0; }

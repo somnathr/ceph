@@ -243,7 +243,7 @@ protected:
   virtual int _lookup(
     const ghobject_t &oid,
     string& full_path,
-    string* mangled_name = NULL) { return 0 ;}
+    string* mangled_name = NULL) = 0; 
 
   /**
    * List contents of the collection, must be implemented by derived class.
