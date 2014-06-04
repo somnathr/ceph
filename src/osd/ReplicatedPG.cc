@@ -2284,7 +2284,7 @@ ReplicatedPG::RepGather *ReplicatedPG::trim_object(const hobject_t &coid)
 {
   // load clone info
   bufferlist bl;
-  ObjectContextRef obc = get_object_context(coid, false, NULL);
+  ObjectContextRef obc = get_object_context(coid, false, NULL, true);
   if (!obc) {
     derr << __func__ << "could not find coid " << coid << dendl;
     assert(0);
@@ -5406,6 +5406,11 @@ int ReplicatedPG::fill_in_copy_get(
   if (soid.snap < CEPH_NOSNAP) {
     reply_obj.snaps = oi.snaps;
   } else {
+    if (soid.snap == CEPH_NOSNAP) {
+      obc->ssc = get_snapset_context(
+        soid, true); 
+    }     
+      
     assert(obc->ssc);
     reply_obj.snap_seq = obc->ssc->snapset.seq;
   }
