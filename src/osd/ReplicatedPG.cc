@@ -7074,7 +7074,6 @@ ObjectContextRef ReplicatedPG::get_object_context(const hobject_t& soid,
       obc->ssc = get_snapset_context(
         soid, true,
         soid.has_snapset() ? attrs : 0);
-      assert(obc->ssc);
     }
 
   } else {
