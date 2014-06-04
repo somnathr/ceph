@@ -888,7 +888,8 @@ protected:
   ObjectContextRef get_object_context(
     const hobject_t& soid,
     bool can_create,
-    map<string, bufferlist> *attrs = 0
+    map<string, bufferlist> *attrs = 0,
+    bool populate_snap = false
     );
 
   void context_registry_on_change();

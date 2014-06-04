@@ -7048,7 +7048,8 @@ ObjectContextRef ReplicatedPG::create_object_context(const object_info_t& oi,
 
 ObjectContextRef ReplicatedPG::get_object_context(const hobject_t& soid,
 						  bool can_create,
-						  map<string, bufferlist> *attrs)
+						  map<string, bufferlist> *attrs,
+                                                  bool populate_snap)
 {
   assert(
     attrs || !pg_log.get_missing().is_missing(soid) ||
@@ -7058,10 +7059,24 @@ ObjectContextRef ReplicatedPG::get_object_context(const hobject_t& soid,
       pg_log_entry_t::LOST_REVERT));
 
   bool need_snap = true;
+  if (soid.snap == CEPH_NOSNAP) {
+    if ((!can_create)&&(!populate_snap)) {
+      need_snap = false;
+    }
+  }
+
   ObjectContextRef obc = object_contexts.lookup(soid);
   if (obc) {
     dout(10) << __func__ << ": found obc in cache: " << obc
 	     << dendl;
+
+    if ((need_snap) && (NULL == obc->ssc)) {
+      obc->ssc = get_snapset_context(
+        soid, true,
+        soid.has_snapset() ? attrs : 0);
+      assert(obc->ssc);
+    }
+
   } else {
     // check disk
     bufferlist bv;
@@ -7104,16 +7119,12 @@ ObjectContextRef ReplicatedPG::get_object_context(const hobject_t& soid,
     obc->destructor_callback = new C_PG_ObjectContext(this, obc.get());
     obc->obs.oi = oi;
     obc->obs.exists = true;
-    if (soid.snap == CEPH_NOSNAP) {
-      if (!can_create)
-        need_snap = false;
-    }
+
     if (need_snap) {
       obc->ssc = get_snapset_context(
         soid, true,
         soid.has_snapset() ? attrs : 0);
     }
-    //register_snapset_context(obc->ssc);
 
     populate_obc_watchers(obc);
 
@@ -7131,6 +7142,7 @@ ObjectContextRef ReplicatedPG::get_object_context(const hobject_t& soid,
     dout(10) << __func__ << ": creating obc from disk: " << obc
 	     << dendl;
   }
+
   if (need_snap) {
     assert(obc->ssc);
     dout(10) << __func__ << ": " << obc << " " << soid
@@ -9889,7 +9901,7 @@ int ReplicatedPG::prep_object_replica_pushes(
   dout(10) << __func__ << ": on " << soid << dendl;
 
   // NOTE: we know we will get a valid oloc off of disk here.
-  ObjectContextRef obc = get_object_context(soid, false);
+  ObjectContextRef obc = get_object_context(soid, false, NULL, true);
   if (!obc) {
     pg_log.missing_add(soid, v, eversion_t());
     missing_loc.remove_location(soid, pg_whoami);
