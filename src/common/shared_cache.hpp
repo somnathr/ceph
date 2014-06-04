@@ -179,6 +179,42 @@ public:
     }
     return val;
   }
+
+  /***
+   * Inserts a key if not present, or bumps it to the front of the LRU if
+   * it is, and then gives you a reference to the value. If the key already
+   * existed, you are responsible for deleting the new value you tried to
+   * insert.
+   *
+   * @param key The key to insert
+   * @param value The value that goes with the key
+   * @param existed Set to true if the value was already in the
+   * map, false otherwise
+   * @return A reference to the map's value for the given key
+   */
+  VPtr add(const K& key, V *value, bool *existed) {
+    VPtr existed_val;
+    list<VPtr> to_release;
+    {
+      Mutex::Locker l(lock);
+      typename map<K, WeakVPtr>::iterator i = weak_refs.find(key);
+      if (i != weak_refs.end()) {
+        existed_val = i->second.lock();
+        if (existed_val){
+          *existed = true;
+          lru_add(key, existed_val, &to_release);
+          return existed_val;
+        }
+      }
+
+      *existed = false;
+      VPtr val(value, Cleanup(this, key));
+      weak_refs.insert(make_pair(key, val));
+      lru_add(key, val, &to_release);
+      return val;
+    }
+  }
+
 };
 
 #endif
