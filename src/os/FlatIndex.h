@@ -29,7 +29,6 @@
  * This class should only be used for converting old filestores.
  */
 class FlatIndex : public CollectionIndex {
-  CollectionIndex* self_ref;
   string base_path;
   coll_t collection;
 public:
@@ -41,8 +40,6 @@ public:
 
   coll_t coll() const { return collection; }
 
-  /// @see CollectionIndex
-  void set_ref(CollectionIndex* ref);
 
   /// @see CollectionIndex
   int cleanup();
@@ -65,7 +62,8 @@ public:
   int lookup(
     const ghobject_t &oid,
     IndexedPath *path,
-    int *exist
+    int *exist,
+    bool will_create = true
     );
 
   /// @see CollectionIndex

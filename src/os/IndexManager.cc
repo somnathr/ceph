@@ -128,7 +128,6 @@ int IndexManager::get_index(coll_t c, const string& baseDir, Index *index) {
     int r = build_index(c, path, index);
     if (r < 0)
       return r;
-    (*index)->set_ref(*index);
     col_indices[c] = (*index);
   } else {
     *index = it->second;

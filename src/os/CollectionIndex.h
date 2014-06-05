@@ -48,17 +48,37 @@ protected:
     /// coll_t for parent Index
     coll_t parent_coll;
 
+    bool need_write_lock;
+
     /// Normal Constructor
     Path(
       string path,                              ///< [in] Path to return.
-      CollectionIndex* ref)  ///< [in] weak_ptr to parent.
-      : full_path(path), parent_ref(ref), parent_coll(parent_ref->coll()) {}
+      CollectionIndex* ref,  ///< [in] weak_ptr to parent.
+      bool will_create = true)
+      : full_path(path), parent_ref(ref), parent_coll(parent_ref->coll()) {
+
+        if (will_create) {
+          need_write_lock = true;
+          parent_ref->access_lock.get_write();
+        } else {
+          need_write_lock = false;
+          parent_ref->access_lock.get_read();
+        }
+      }
 
     /// Debugging Constructor
     Path(
       string path,                              ///< [in] Path to return.
       coll_t coll)                              ///< [in] collection
       : full_path(path), parent_coll(coll) {}
+
+    ~Path() {
+      if (need_write_lock) {
+        parent_ref->access_lock.put_write();
+      } else {
+        parent_ref->access_lock.put_read();
+      }
+    } 
       
     /// Getter for the stored path.
     const char *path() const { return full_path.c_str(); }
@@ -97,12 +117,6 @@ protected:
    */
   virtual coll_t coll() const = 0;
 
-  /** 
-   * For setting the internal weak_ptr to a shared_ptr to this.
-   *
-   * @see IndexManager
-   */
-  virtual void set_ref(CollectionIndex* ref) = 0;
 
   /** 
    * Initializes the index.
@@ -151,7 +165,8 @@ protected:
   virtual int lookup(
     const ghobject_t &oid, ///< [in] Object to lookup
     IndexedPath *path,	   ///< [out] Path to object
-    int *exist	           ///< [out] True if the object exists, else false
+    int *exist,	           ///< [out] True if the object exists, else false
+    bool will_create = true
     ) = 0;
 
   /**

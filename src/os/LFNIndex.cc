@@ -64,10 +64,6 @@ void LFNIndex::maybe_inject_failure()
 
 /* Public methods */
 
-void LFNIndex::set_ref(CollectionIndex* ref)
-{
-  self_ref = ref;
-}
 
 int LFNIndex::init()
 {
@@ -109,7 +105,8 @@ int LFNIndex::unlink(const ghobject_t &oid)
 
 int LFNIndex::lookup(const ghobject_t &oid,
 		     IndexedPath *out_path,
-		     int *exist)
+		     int *exist,
+                     bool will_create)
 {
   WRAP_RETRY(
 
@@ -133,7 +130,7 @@ int LFNIndex::lookup(const ghobject_t &oid,
   } else {
     *exist = 1;
   }
-  *out_path = IndexedPath(new Path(full_path, self_ref));
+  *out_path = IndexedPath(new Path(full_path, this, will_create));
   r = 0;
   );
 }

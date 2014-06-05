@@ -49,9 +49,6 @@ using ceph::crypto::SHA1;
 
 #define FILENAME_PREFIX_LEN (FILENAME_SHORT_LEN - FILENAME_HASH_LEN - (sizeof(FILENAME_COOKIE) - 1) - FILENAME_EXTRA)
 
-void FlatIndex::set_ref(CollectionIndex* ref) {
-  self_ref = ref;
-}
 
 int FlatIndex::cleanup() {
   return 0;
@@ -346,7 +343,7 @@ int FlatIndex::unlink(const ghobject_t &o) {
   return 0;
 }
 
-int FlatIndex::lookup(const ghobject_t &hoid, IndexedPath *path, int *exist) {
+int FlatIndex::lookup(const ghobject_t &hoid, IndexedPath *path, int *exist, bool will_create) {
   char long_fn[PATH_MAX];
   char short_fn[PATH_MAX];
   int r;
@@ -356,7 +353,7 @@ int FlatIndex::lookup(const ghobject_t &hoid, IndexedPath *path, int *exist) {
 	      sizeof(long_fn), exist, &is_lfn);
   if (r < 0)
     return r;
-  *path = IndexedPath(new Path(string(short_fn), self_ref));
+  *path = IndexedPath(new Path(string(short_fn), this, will_create));
   return 0;
 }
 

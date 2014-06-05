@@ -98,8 +98,6 @@ class LFNIndex : public CollectionIndex {
 
   /// Path to Index base.
   const string base_path;
-  /// For reference counting the collection @see Path
-  CollectionIndex* self_ref;
 
 protected:
   const uint32_t index_version;
@@ -155,7 +153,6 @@ public:
   virtual ~LFNIndex() {}
 
   /// @see CollectionIndex
-  void set_ref(CollectionIndex* ref);
 
   /// @see CollectionIndex
   int init();
@@ -178,7 +175,8 @@ public:
   int lookup(
     const ghobject_t &oid,
     IndexedPath *path,
-    int *exist
+    int *exist,
+    bool will_create = true
     );
 
   /// @see CollectionIndex

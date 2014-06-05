@@ -251,10 +251,7 @@ int FileStore::lfn_open(coll_t cid,
 	   << ": " << cpp_strerror(-r) << dendl;
       goto fail;
     }
-    {
-      RWLock::RLocker read_lock((*index)->access_lock);
-      r = (*index)->lookup(oid, path, &exist);
-    }
+    r = (*index)->lookup(oid, path, &exist, create);
     if (r < 0) {
       derr << "could not find " << oid << " in index: "
 	   << cpp_strerror(-r) << dendl;
@@ -271,13 +268,9 @@ int FileStore::lfn_open(coll_t cid,
     fd = r;
 
     if (create && (!exist)) {
-
-      {
-        RWLock::WLocker write_lock((*index)->access_lock);
-        r = (*index)->created(oid, (*path)->path());
-      }
+      r = (*index)->created(oid, (*path)->path());
       if (r < 0) {
-	VOID_TEMP_FAILURE_RETRY(::close(fd));
+        VOID_TEMP_FAILURE_RETRY(::close(fd));
 	derr << "error creating " << oid << " (" << (*path)->path()
 	     << ") in index: " << cpp_strerror(-r) << dendl;
 	goto fail;
