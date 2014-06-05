@@ -220,6 +220,7 @@ int FileStore::lfn_open(coll_t cid,
 	 ( oid.shard_id == ghobject_t::NO_SHARD &&
 	   oid.generation == ghobject_t::NO_GEN ));
   assert(outfd);
+  bool need_to_lock = false;
 
   if (!replaying) {
     *outfd = fdcache.lookup(oid);
@@ -238,6 +239,7 @@ int FileStore::lfn_open(coll_t cid,
   int r = 0;
   if (!(*index)) {
     r = get_index(cid, index);
+    need_to_lock = true;
   }
 
   int fd, exist;
@@ -251,7 +253,7 @@ int FileStore::lfn_open(coll_t cid,
 	   << ": " << cpp_strerror(-r) << dendl;
       goto fail;
     }
-    r = (*index)->lookup(oid, path, &exist, create);
+    r = (*index)->lookup(oid, path, &exist, need_to_lock, create);
     if (r < 0) {
       derr << "could not find " << oid << " in index: "
 	   << cpp_strerror(-r) << dendl;

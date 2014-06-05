@@ -68,50 +68,37 @@ TEST(FlatIndex, created_unlink) {
   //
   // short object name
   //
+  
   {
+    CollectionIndex::IndexedPath indexed_path;
     const std::string object_name(10, 'A');
     ghobject_t hoid(hobject_t(object_t(object_name), key, CEPH_NOSNAP, hash, pool, ""));
     int exists;
-
-    { 
-      CollectionIndex::IndexedPath indexed_path;
-      EXPECT_EQ(0, index->lookup(hoid, &indexed_path, &exists));
-      EXPECT_EQ(0, exists);
-      EXPECT_EQ(0, ::close(::creat(indexed_path->path(), 0600)));
-    }
-    {
-      CollectionIndex::IndexedPath indexed_path;
-      EXPECT_EQ(0, index->lookup(hoid, &indexed_path, &exists));
-      EXPECT_EQ(1, exists);
-      EXPECT_EQ(0, index->unlink(hoid));
-    }
-    {
-      CollectionIndex::IndexedPath indexed_path;
-      EXPECT_EQ(0, index->lookup(hoid, &indexed_path, &exists));
-      EXPECT_EQ(0, exists);
-    }
+    EXPECT_EQ(0, index->lookup(hoid, &indexed_path, &exists));
+    EXPECT_EQ(0, exists);
+    EXPECT_EQ(0, ::close(::creat(indexed_path->path(), 0600)));
+    EXPECT_EQ(0, index->lookup(hoid, &indexed_path, &exists, false));
+    EXPECT_EQ(1, exists);
+    EXPECT_EQ(0, index->unlink(hoid));
+    EXPECT_EQ(0, index->lookup(hoid, &indexed_path, &exists, false));
+    EXPECT_EQ(0, exists);
   }
   //
   // long object name
   //
+
   {
+    CollectionIndex::IndexedPath indexed_path;
     const std::string object_name(1024, 'A');
     ghobject_t hoid(hobject_t(object_t(object_name), key, CEPH_NOSNAP, hash, pool, ""));
     int exists;
-
-    {
-      CollectionIndex::IndexedPath indexed_path;
-      EXPECT_EQ(0, index->lookup(hoid, &indexed_path, &exists));
-      EXPECT_EQ(0, exists);
-      EXPECT_EQ(0, ::close(::creat(indexed_path->path(), 0600)));
-      EXPECT_EQ(0, index->created(hoid, indexed_path->path()));
-      EXPECT_EQ(0, index->unlink(hoid));
-    }
-    {
-      CollectionIndex::IndexedPath indexed_path;
-      EXPECT_EQ(0, index->lookup(hoid, &indexed_path, &exists));
-      EXPECT_EQ(0, exists);
-    }
+    EXPECT_EQ(0, index->lookup(hoid, &indexed_path, &exists));
+    EXPECT_EQ(0, exists);
+    EXPECT_EQ(0, ::close(::creat(indexed_path->path(), 0600)));
+    EXPECT_EQ(0, index->created(hoid, indexed_path->path()));
+    EXPECT_EQ(0, index->unlink(hoid));
+    EXPECT_EQ(0, index->lookup(hoid, &indexed_path, &exists, false));
+    EXPECT_EQ(0, exists);
   }
   EXPECT_EQ(0, ::system("rm -fr PATH"));
 }

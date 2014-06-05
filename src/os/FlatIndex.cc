@@ -343,7 +343,7 @@ int FlatIndex::unlink(const ghobject_t &o) {
   return 0;
 }
 
-int FlatIndex::lookup(const ghobject_t &hoid, IndexedPath *path, int *exist, bool will_create) {
+int FlatIndex::lookup(const ghobject_t &hoid, IndexedPath *path, int *exist, bool need_to_lock, bool need_write) {
   char long_fn[PATH_MAX];
   char short_fn[PATH_MAX];
   int r;
@@ -353,7 +353,7 @@ int FlatIndex::lookup(const ghobject_t &hoid, IndexedPath *path, int *exist, boo
 	      sizeof(long_fn), exist, &is_lfn);
   if (r < 0)
     return r;
-  *path = IndexedPath(new Path(string(short_fn), this, will_create));
+  *path = IndexedPath(new Path(string(short_fn), this, need_to_lock, need_write));
   return 0;
 }
 

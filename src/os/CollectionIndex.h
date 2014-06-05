@@ -47,23 +47,25 @@ protected:
     CollectionIndex* parent_ref;
     /// coll_t for parent Index
     coll_t parent_coll;
-
-    bool need_write_lock;
+    bool is_locked;
+    bool is_write_lock;
 
     /// Normal Constructor
     Path(
       string path,                              ///< [in] Path to return.
       CollectionIndex* ref,  ///< [in] weak_ptr to parent.
-      bool will_create = true)
-      : full_path(path), parent_ref(ref), parent_coll(parent_ref->coll()) {
+      bool  need_to_lock = true,
+      bool  need_write_lock = true)
+      : full_path(path), parent_ref(ref), parent_coll(parent_ref->coll())
+        , is_locked(need_to_lock), is_write_lock(need_write_lock) {
 
-        if (will_create) {
-          need_write_lock = true;
-          parent_ref->access_lock.get_write();
-        } else {
-          need_write_lock = false;
-          parent_ref->access_lock.get_read();
-        }
+        if (is_locked) {
+          if (is_write_lock) {
+            parent_ref->access_lock.get_write();
+          } else {
+            parent_ref->access_lock.get_read();
+          }
+        } 
       }
 
     /// Debugging Constructor
@@ -73,10 +75,12 @@ protected:
       : full_path(path), parent_coll(coll) {}
 
     ~Path() {
-      if (need_write_lock) {
-        parent_ref->access_lock.put_write();
-      } else {
-        parent_ref->access_lock.put_read();
+      if (is_locked) {
+        if (is_write_lock) {
+          parent_ref->access_lock.put_write();
+        } else {
+          parent_ref->access_lock.put_read();
+        }
       }
     } 
       
@@ -166,7 +170,8 @@ protected:
     const ghobject_t &oid, ///< [in] Object to lookup
     IndexedPath *path,	   ///< [out] Path to object
     int *exist,	           ///< [out] True if the object exists, else false
-    bool will_create = true
+    bool need_to_lock = true,
+    bool need_write = true
     ) = 0;
 
   /**

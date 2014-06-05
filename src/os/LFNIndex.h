@@ -176,7 +176,8 @@ public:
     const ghobject_t &oid,
     IndexedPath *path,
     int *exist,
-    bool will_create = true
+    bool need_to_lock = true,
+    bool need_write = true
     );
 
   /// @see CollectionIndex
