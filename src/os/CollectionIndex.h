@@ -48,7 +48,6 @@ protected:
     /// coll_t for parent Index
     coll_t parent_coll;
     bool is_locked;
-    bool is_write_lock;
 
     /// Normal Constructor
     Path(
@@ -57,14 +56,10 @@ protected:
       bool  need_to_lock = true,
       bool  need_write_lock = true)
       : full_path(path), parent_ref(ref), parent_coll(parent_ref->coll())
-        , is_locked(need_to_lock), is_write_lock(need_write_lock) {
+        , is_locked(need_to_lock) {
 
         if (is_locked) {
-          if (is_write_lock) {
-            parent_ref->access_lock.get_write();
-          } else {
-            parent_ref->access_lock.get_read();
-          }
+          parent_ref->access_lock.Lock();
         } 
       }
 
@@ -76,11 +71,7 @@ protected:
 
     ~Path() {
       if (is_locked) {
-        if (is_write_lock) {
-          parent_ref->access_lock.put_write();
-        } else {
-          parent_ref->access_lock.put_read();
-        }
+        parent_ref->access_lock.Unlock();
       }
     } 
       
@@ -97,7 +88,7 @@ protected:
   };
  public:
 
-  RWLock access_lock;
+  Mutex access_lock;
   /// Type of returned paths
   typedef ceph::shared_ptr<Path> IndexedPath;
 
@@ -170,8 +161,7 @@ protected:
     const ghobject_t &oid, ///< [in] Object to lookup
     IndexedPath *path,	   ///< [out] Path to object
     int *exist,	           ///< [out] True if the object exists, else false
-    bool need_to_lock = true,
-    bool need_write = true
+    bool need_to_lock = true
     ) = 0;
 
   /**

@@ -253,7 +253,7 @@ int FileStore::lfn_open(coll_t cid,
 	   << ": " << cpp_strerror(-r) << dendl;
       goto fail;
     }
-    r = (*index)->lookup(oid, path, &exist, need_to_lock, create);
+    r = (*index)->lookup(oid, path, &exist, need_to_lock);
     if (r < 0) {
       derr << "could not find " << oid << " in index: "
 	   << cpp_strerror(-r) << dendl;
