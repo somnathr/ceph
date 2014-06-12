@@ -222,6 +222,13 @@ int FileStore::lfn_open(coll_t cid,
 	 ( oid.shard_id == shard_id_t::NO_SHARD &&
 	   oid.generation == ghobject_t::NO_GEN ));
   assert(outfd);
+
+  if (!replaying) {
+    *outfd = fdcache.lookup(oid);
+    if (*outfd)
+      return 0;
+  }
+
   int flags = O_RDWR;
   if (create)
     flags |= O_CREAT;
@@ -235,11 +242,6 @@ int FileStore::lfn_open(coll_t cid,
   }
 
   int fd, exist;
-  if (!replaying) {
-    *outfd = fdcache.lookup(oid);
-    if (*outfd)
-      return 0;
-  }
 
   {
     IndexedPath path2;
