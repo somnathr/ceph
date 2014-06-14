@@ -21,7 +21,6 @@
 
 #include "osd/osd_types.h"
 #include "include/object.h"
-#include "common/RWLock.h"
 
 /**
  * CollectionIndex provides an interface for manipulating indexed collections
@@ -46,17 +45,34 @@ protected:
     /// coll_t for parent Index
     coll_t parent_coll;
 
+    bool is_locked;
+
     /// Normal Constructor
     Path(
       string path,                              ///< [in] Path to return.
-      CollectionIndex* ref)  ///< [in] weak_ptr to parent.
-      : full_path(path), parent_ref(ref), parent_coll(parent_ref->coll()) {}
+      CollectionIndex* ref,  ///< [in] weak_ptr to parent.
+      bool  need_to_lock = true)
+      : full_path(path), parent_ref(ref), parent_coll(parent_ref->coll())
+        , is_locked(false) {
+
+      if (need_to_lock) {
+        parent_ref->access_lock.Lock();
+        is_locked = true;
+      }
+    }
 
     /// Debugging Constructor
     Path(
       string path,                              ///< [in] Path to return.
       coll_t coll)                              ///< [in] collection
-      : full_path(path), parent_coll(coll) {}
+      : full_path(path), parent_coll(coll), is_locked(false) {}
+
+    ~Path() {
+      if (is_locked) {
+        parent_ref->access_lock.Unlock();
+      }
+    }
+
       
     /// Getter for the stored path.
     const char *path() const { return full_path.c_str(); }
@@ -71,7 +87,7 @@ protected:
   };
  public:
 
-  RWLock access_lock;
+  Mutex access_lock;
   /// Type of returned paths
   typedef ceph::shared_ptr<Path> IndexedPath;
 
@@ -143,7 +159,8 @@ protected:
   virtual int lookup(
     const ghobject_t &oid, ///< [in] Object to lookup
     IndexedPath *path,	   ///< [out] Path to object
-    int *exist	           ///< [out] True if the object exists, else false
+    int *exist,	           ///< [out] True if the object exists, else false
+    bool need_to_lock = true
     ) = 0;
 
   /**

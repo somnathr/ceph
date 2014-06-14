@@ -76,10 +76,10 @@ TEST(FlatIndex, created_unlink) {
     EXPECT_EQ(0, index->lookup(hoid, &indexed_path, &exists));
     EXPECT_EQ(0, exists);
     EXPECT_EQ(0, ::close(::creat(indexed_path->path(), 0600)));
-    EXPECT_EQ(0, index->lookup(hoid, &indexed_path, &exists));
+    EXPECT_EQ(0, index->lookup(hoid, &indexed_path, &exists, false));
     EXPECT_EQ(1, exists);
     EXPECT_EQ(0, index->unlink(hoid));
-    EXPECT_EQ(0, index->lookup(hoid, &indexed_path, &exists));
+    EXPECT_EQ(0, index->lookup(hoid, &indexed_path, &exists, false));
     EXPECT_EQ(0, exists);
   }
   //
@@ -95,7 +95,7 @@ TEST(FlatIndex, created_unlink) {
     EXPECT_EQ(0, ::close(::creat(indexed_path->path(), 0600)));
     EXPECT_EQ(0, index->created(hoid, indexed_path->path()));
     EXPECT_EQ(0, index->unlink(hoid));
-    EXPECT_EQ(0, index->lookup(hoid, &indexed_path, &exists));
+    EXPECT_EQ(0, index->lookup(hoid, &indexed_path, &exists, false));
     EXPECT_EQ(0, exists);
   }
   EXPECT_EQ(0, ::system("rm -fr PATH"));

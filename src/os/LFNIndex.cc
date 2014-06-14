@@ -104,7 +104,8 @@ int LFNIndex::unlink(const ghobject_t &oid)
 
 int LFNIndex::lookup(const ghobject_t &oid,
 		     IndexedPath *out_path,
-		     int *exist)
+		     int *exist,
+                     bool need_to_lock)
 {
   WRAP_RETRY(
   vector<string> path;
@@ -127,7 +128,7 @@ int LFNIndex::lookup(const ghobject_t &oid,
   } else {
     *exist = 1;
   }
-  *out_path = IndexedPath(new Path(full_path, this));
+  *out_path = IndexedPath(new Path(full_path, this, need_to_lock));
   r = 0;
   );
 }

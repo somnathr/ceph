@@ -227,6 +227,7 @@ int FileStore::lfn_open(coll_t cid,
       return 0;
   }
 
+  bool need_to_lock = false;
   int flags = O_RDWR;
   if (create)
     flags |= O_CREAT;
@@ -238,6 +239,7 @@ int FileStore::lfn_open(coll_t cid,
   int r = 0;
   if (!(*index)) {
     r = get_index(cid, index);
+    need_to_lock = true;
   }
 
   int fd, exist;
@@ -251,10 +253,9 @@ int FileStore::lfn_open(coll_t cid,
 	   << ": " << cpp_strerror(-r) << dendl;
       goto fail;
     }
-    {
-      RWLock::RLocker read_lock((*index)->access_lock);
-      r = (*index)->lookup(oid, path, &exist);
-    }
+
+    r = (*index)->lookup(oid, path, &exist, need_to_lock);
+
     if (r < 0) {
       derr << "could not find " << oid << " in index: "
 	   << cpp_strerror(-r) << dendl;
@@ -271,16 +272,12 @@ int FileStore::lfn_open(coll_t cid,
     fd = r;
 
     if (create && (!exist)) {
-
-      {
-        RWLock::WLocker write_lock((*index)->access_lock);
-        r = (*index)->created(oid, (*path)->path());
-      }
+      r = (*index)->created(oid, (*path)->path());
       if (r < 0) {
-	VOID_TEMP_FAILURE_RETRY(::close(fd));
-	derr << "error creating " << oid << " (" << (*path)->path()
-	     << ") in index: " << cpp_strerror(-r) << dendl;
-	goto fail;
+        VOID_TEMP_FAILURE_RETRY(::close(fd));
+        derr << "error creating " << oid << " (" << (*path)->path()
+          << ") in index: " << cpp_strerror(-r) << dendl;
+        goto fail;
       }
       r = chain_fsetxattr(fd, XATTR_SPILL_OUT_NAME,
                           XATTR_NO_SPILL_OUT, sizeof(XATTR_NO_SPILL_OUT));

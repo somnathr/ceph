@@ -61,7 +61,8 @@ public:
   int lookup(
     const ghobject_t &oid,
     IndexedPath *path,
-    int *exist
+    int *exist,
+    bool need_to_lock = true
     );
 
   /// @see CollectionIndex
