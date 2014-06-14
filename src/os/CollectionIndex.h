@@ -36,8 +36,6 @@ protected:
    * a shared_ptr to the CollectionIndex to keep the index alive
    * during its lifetime.
    * @see IndexManager
-   * @see self_ref
-   * @see set_ref
    */
   class Path {
   public:
@@ -97,12 +95,6 @@ protected:
    */
   virtual coll_t coll() const = 0;
 
-  /** 
-   * For setting the internal weak_ptr to a shared_ptr to this.
-   *
-   * @see IndexManager
-   */
-  virtual void set_ref(CollectionIndex* ref) = 0;
 
   /** 
    * Initializes the index.
