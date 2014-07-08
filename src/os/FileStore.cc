@@ -227,6 +227,7 @@ int FileStore::lfn_open(coll_t cid,
   assert(outfd);
   int r = 0;
 
+  bool need_lock = true;
   if (!replaying) {
     *outfd = fdcache.lookup(oid);
     if (*outfd) {
@@ -240,8 +241,6 @@ int FileStore::lfn_open(coll_t cid,
       }
     }
   }
-
-  bool need_lock = true;
 
   int flags = O_RDWR;
   if (create)
