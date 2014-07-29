@@ -4263,7 +4263,7 @@ int FileStore::collection_version_current(coll_t c, uint32_t *version)
     return r;
 
   assert(NULL != index.index);
-  RWLock::WLocker l((index.index)->access_lock);
+  RWLock::RLocker l((index.index)->access_lock);
 
   *version = index->collection_version();
   if (*version == target_version)
@@ -4815,7 +4815,7 @@ int FileStore::_omap_clear(coll_t cid, const ghobject_t &hoid,
     return r;
 
   assert(NULL != index.index);
-  RWLock::WLocker l((index.index)->access_lock);
+  RWLock::RLocker l((index.index)->access_lock);
 
   r = lfn_find(hoid, index);
 
@@ -4837,7 +4837,7 @@ int FileStore::_omap_setkeys(coll_t cid, const ghobject_t &hoid,
     return r;
 
   assert(NULL != index.index);
-  RWLock::WLocker l((index.index)->access_lock);
+  RWLock::RLocker l((index.index)->access_lock);
 
   r = lfn_find(hoid, index);
 
@@ -4856,7 +4856,7 @@ int FileStore::_omap_rmkeys(coll_t cid, const ghobject_t &hoid,
     return r;
 
   assert(NULL != index.index);
-  RWLock::WLocker l((index.index)->access_lock);
+  RWLock::RLocker l((index.index)->access_lock);
 
   r = lfn_find(hoid, index);
 
@@ -4896,7 +4896,7 @@ int FileStore::_omap_setheader(coll_t cid, const ghobject_t &hoid,
     return r;
 
   assert(NULL != index.index);
-  RWLock::WLocker l((index.index)->access_lock);
+  RWLock::RLocker l((index.index)->access_lock);
 
   r = lfn_find(hoid, index);
 
