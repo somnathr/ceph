@@ -341,6 +341,7 @@ int FileStore::lfn_link(coll_t c, coll_t newcid, const ghobject_t& o, const ghob
   IndexedPath path_new, path_old;
   int exist;
   int r;
+  bool index_same = false;
   if (c < newcid) {
     r = get_index(newcid, &index_new);
     if (r < 0)
@@ -353,6 +354,7 @@ int FileStore::lfn_link(coll_t c, coll_t newcid, const ghobject_t& o, const ghob
     if (r < 0)
       return r;
     index_new = index_old;
+    index_same = true;
   } else {
     r = get_index(c, &index_old);
     if (r < 0)
@@ -363,38 +365,72 @@ int FileStore::lfn_link(coll_t c, coll_t newcid, const ghobject_t& o, const ghob
   }
 
   assert(NULL != index_old.index);
-  RWLock::RLocker l1((index_old.index)->access_lock);
-
-  r = index_old->lookup(o, &path_old, &exist);
-  if (r < 0) {
-    assert(!m_filestore_fail_eio || r != -EIO);
-    return r;
-  }
-  if (!exist)
-    return -ENOENT;
-  
   assert(NULL != index_new.index);
-  RWLock::WLocker l2((index_new.index)->access_lock);
 
-  r = index_new->lookup(newoid, &path_new, &exist);
-  if (r < 0) {
-    assert(!m_filestore_fail_eio || r != -EIO);
-    return r;
-  }
-  if (exist)
-    return -EEXIST;
+  if (!index_same) {
 
-  dout(25) << "lfn_link path_old: " << path_old << dendl;
-  dout(25) << "lfn_link path_new: " << path_new << dendl;
-  r = ::link(path_old->path(), path_new->path());
-  if (r < 0)
-    return -errno;
+    RWLock::RLocker l1((index_old.index)->access_lock);
 
-  r = index_new->created(newoid, path_new->path());
-  if (r < 0) {
-    assert(!m_filestore_fail_eio || r != -EIO);
-    return r;
-  }
+    r = index_old->lookup(o, &path_old, &exist);
+    if (r < 0) {
+      assert(!m_filestore_fail_eio || r != -EIO);
+      return r;
+    }
+    if (!exist)
+      return -ENOENT;
+  
+    RWLock::WLocker l2((index_new.index)->access_lock);
+
+    r = index_new->lookup(newoid, &path_new, &exist);
+    if (r < 0) {
+      assert(!m_filestore_fail_eio || r != -EIO);
+      return r;
+    }
+    if (exist)
+      return -EEXIST;
+
+    dout(25) << "lfn_link path_old: " << path_old << dendl;
+    dout(25) << "lfn_link path_new: " << path_new << dendl;
+    r = ::link(path_old->path(), path_new->path());
+    if (r < 0)
+      return -errno;
+
+    r = index_new->created(newoid, path_new->path());
+    if (r < 0) {
+      assert(!m_filestore_fail_eio || r != -EIO);
+      return r;
+    }
+  } else {
+    RWLock::WLocker l1((index_old.index)->access_lock);
+
+    r = index_old->lookup(o, &path_old, &exist);
+    if (r < 0) {
+      assert(!m_filestore_fail_eio || r != -EIO);
+      return r;
+    }
+    if (!exist)
+      return -ENOENT;
+
+    r = index_new->lookup(newoid, &path_new, &exist);
+    if (r < 0) {
+      assert(!m_filestore_fail_eio || r != -EIO);
+      return r;
+    }
+    if (exist)
+      return -EEXIST;
+
+    dout(25) << "lfn_link path_old: " << path_old << dendl;
+    dout(25) << "lfn_link path_new: " << path_new << dendl;
+    r = ::link(path_old->path(), path_new->path());
+    if (r < 0)
+      return -errno;
+
+    r = index_new->created(newoid, path_new->path());
+    if (r < 0) {
+      assert(!m_filestore_fail_eio || r != -EIO);
+      return r;
+    }
+  }    
   return 0;
 }
 
