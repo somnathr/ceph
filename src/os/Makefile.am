@@ -1,3 +1,8 @@
+libos_types_la_SOURCES = \
+	os/Transaction.cc
+libos_types_la_CXXFLAGS = ${AM_CXXFLAGS}
+noinst_LTLIBRARIES += libos_types.la
+
 libos_la_SOURCES = \
 	os/chain_xattr.cc \
 	os/DBObjectMap.cc \
@@ -12,6 +17,7 @@ libos_la_SOURCES = \
 	os/LevelDBStore.cc \
 	os/LFNIndex.cc \
 	os/MemStore.cc \
+	os/KeyValueDB.cc \
 	os/KeyValueStore.cc \
 	os/ObjectStore.cc \
 	os/WBThrottle.cc \
@@ -29,6 +35,8 @@ if WITH_LIBZFS
 libos_la_SOURCES += os/ZFSFileStoreBackend.cc
 endif
 
+libos_la_CXXFLAGS = ${AM_CXXFLAGS}
+libos_la_LIBADD = $(LIBOS_TYPES)
 noinst_LTLIBRARIES += libos.la
 
 noinst_HEADERS += \
@@ -66,3 +74,9 @@ noinst_LIBRARIES += libos_zfs.a
 noinst_HEADERS += os/ZFS.h
 endif
 
+if WITH_KINETIC
+libos_la_SOURCES += os/KineticStore.cc
+libos_la_CXXFLAGS += -std=gnu++11
+libos_la_LIBADD += -lkinetic_client -lprotobuf -lglog -lgflags libcrypto.a
+noinst_HEADERS += os/KineticStore.h
+endif

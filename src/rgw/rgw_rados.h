@@ -1,3 +1,6 @@
+// -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
+// vim: ts=8 sw=2 smarttab
+
 #ifndef CEPH_RGWRADOS_H
 #define CEPH_RGWRADOS_H
 
@@ -162,7 +165,8 @@ struct RGWObjManifestRule {
     ::decode(start_ofs, bl);
     ::decode(part_size, bl);
     ::decode(stripe_max_size, bl);
-    ::decode(override_prefix, bl);
+    if (struct_v >= 2)
+      ::decode(override_prefix, bl);
     DECODE_FINISH(bl);
   }
   void dump(Formatter *f) const;
@@ -374,6 +378,7 @@ public:
     void init() {
       part_ofs = 0;
       stripe_ofs = 0;
+      ofs = 0;
       stripe_size = 0;
       cur_part_id = 0;
       cur_stripe = 0;
@@ -616,6 +621,8 @@ class RGWPutObjProcessor_Atomic : public RGWPutObjProcessor_Aio
   uint64_t extra_data_len;
   bufferlist extra_data_bl;
   bufferlist pending_data_bl;
+  uint64_t max_chunk_size;
+
 protected:
   rgw_bucket bucket;
   string obj_str;
@@ -634,6 +641,8 @@ protected:
   int complete_parts();
   int complete_writing_data();
 
+  int prepare_init(RGWRados *store, void *obj_ctx, string *oid_rand);
+
 public:
   ~RGWPutObjProcessor_Atomic() {}
   RGWPutObjProcessor_Atomic(const string& bucket_owner, rgw_bucket& _b, const string& _o, uint64_t _p, const string& _t) :
@@ -644,6 +653,7 @@ public:
                                 cur_part_id(0),
                                 data_ofs(0),
                                 extra_data_len(0),
+                                max_chunk_size(0),
                                 bucket(_b),
                                 obj_str(_o),
                                 unique_tag(_t) {}
@@ -1264,8 +1274,6 @@ class RGWRados
   int get_obj_ref(const rgw_obj& obj, rgw_rados_ref *ref, rgw_bucket *bucket, bool ref_system_obj = false);
   uint64_t max_bucket_id;
 
-  uint64_t max_chunk_size;
-
   int get_obj_state(RGWRadosCtx *rctx, rgw_obj& obj, RGWObjState **state, RGWObjVersionTracker *objv_tracker);
   int append_atomic_test(RGWRadosCtx *rctx, rgw_obj& obj,
                          librados::ObjectOperation& op, RGWObjState **state);
@@ -1330,7 +1338,6 @@ public:
                num_watchers(0), watchers(NULL), watch_handles(NULL),
                watch_initialized(false),
                bucket_id_lock("rados_bucket_id"), max_bucket_id(0),
-               max_chunk_size(0),
                cct(NULL), rados(NULL),
                pools_initialized(false),
                quota_handler(NULL),
@@ -1368,9 +1375,8 @@ public:
     }
   }
 
-  uint64_t get_max_chunk_size() {
-    return max_chunk_size;
-  }
+  int get_required_alignment(rgw_bucket& bucket, uint64_t *alignment);
+  int get_max_chunk_size(rgw_bucket& bucket, uint64_t *max_chunk_size);
 
   int list_raw_objects(rgw_bucket& pool, const string& prefix_filter, int max,
                        RGWListRawObjsCtx& ctx, list<string>& oids,
@@ -1435,8 +1441,9 @@ public:
    *     here.
    */
   virtual int list_objects(rgw_bucket& bucket, int max, std::string& prefix, std::string& delim,
-                   std::string& marker, std::vector<RGWObjEnt>& result, map<string, bool>& common_prefixes,
-		   bool get_content_type, string& ns, bool enforce_ns, bool *is_truncated, RGWAccessListFilter *filter);
+                   std::string& marker, std::string *next_marker, std::vector<RGWObjEnt>& result,
+                   map<string, bool>& common_prefixes, bool get_content_type, string& ns, bool enforce_ns,
+                   bool *is_truncated, RGWAccessListFilter *filter);
 
   virtual int create_pool(rgw_bucket& bucket);
 
@@ -1606,6 +1613,7 @@ public:
 	       void **handle, off_t end,
                rgw_obj& dest_obj,
                rgw_obj& src_obj,
+               uint64_t max_chunk_size,
 	       time_t *mtime,
                map<string, bufferlist>& attrs,
                RGWObjCategory category,

@@ -121,7 +121,7 @@ protected:
   }
 
 private:
-  string lfn_attribute;
+  string lfn_attribute, lfn_alt_attribute;
   coll_t collection;
 
 public:
@@ -144,7 +144,8 @@ public:
       char buf[100];
       snprintf(buf, sizeof(buf), "%d", index_version);
       lfn_attribute = LFN_ATTR + string(buf);
-    }
+      lfn_alt_attribute = LFN_ATTR + string(buf) + "-alt";
+   }
   }
 
   coll_t coll() const { return collection; }
@@ -417,6 +418,9 @@ private:
    */
   const string &get_lfn_attr() const {
     return lfn_attribute;
+  }
+  const string &get_alt_lfn_attr() const {
+    return lfn_alt_attribute;
   }
 
   /**

@@ -14,7 +14,7 @@ set -e
 [ -z "$CEPH_NUM_RGW" ] && CEPH_NUM_RGW="$RGW"
 
 [ -z "$CEPH_NUM_MON" ] && CEPH_NUM_MON=3
-[ -z "$CEPH_NUM_OSD" ] && CEPH_NUM_OSD=1
+[ -z "$CEPH_NUM_OSD" ] && CEPH_NUM_OSD=3
 [ -z "$CEPH_NUM_MDS" ] && CEPH_NUM_MDS=3
 [ -z "$CEPH_NUM_RGW" ] && CEPH_NUM_RGW=1
 
@@ -527,6 +527,18 @@ EOF
                     $SUDO $CEPH_ADM -i $CEPH_DEV_DIR/mds.${name}s/keyring auth add mds.${name}s \
 			mon 'allow *' osd 'allow *' mds 'allow'
 	    fi
+
+        cmd="$CEPH_ADM osd pool create cephfs_data 128"
+        echo $cmd
+        $cmd
+
+        cmd="$CEPH_ADM osd pool create cephfs_metadata 128"
+        echo $cmd
+        $cmd
+
+        cmd="$CEPH_ADM fs new cephfs cephfs_metadata cephfs_data"
+        echo $cmd
+        $cmd
 	fi
 	
 	run 'mds' $CEPH_BIN/ceph-mds -i $name $ARGS $CMDS_ARGS

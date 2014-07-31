@@ -37,15 +37,9 @@ using namespace std;
 #include "common/Mutex.h"
 #include "GenericObjectMap.h"
 #include "KeyValueDB.h"
+#include "common/random_cache.hpp"
 
 #include "include/uuid.h"
-
-enum kvstore_types {
-    KV_TYPE_NONE = 0,
-    KV_TYPE_LEVELDB,
-    KV_TYPE_OTHER
-};
-
 
 static uint64_t default_strip_size = 1024;
 
@@ -93,43 +87,53 @@ class StripObjectMap: public GenericObjectMap {
       DECODE_FINISH(bl);
     }
   };
+  typedef ceph::shared_ptr<StripObjectHeader> StripObjectHeaderRef;
 
   static int file_to_extents(uint64_t offset, size_t len, uint64_t strip_size,
                              vector<StripExtent> &extents);
   int lookup_strip_header(const coll_t & cid, const ghobject_t &oid,
-                          StripObjectHeader &header);
-  int save_strip_header(StripObjectHeader &header, KeyValueDB::Transaction t);
+                          StripObjectHeaderRef *header);
+  int save_strip_header(StripObjectHeaderRef header, KeyValueDB::Transaction t);
   int create_strip_header(const coll_t &cid, const ghobject_t &oid,
-                          StripObjectHeader &strip_header,
+                          StripObjectHeaderRef *strip_header,
                           KeyValueDB::Transaction t);
-  void clone_wrap(StripObjectHeader &old_header,
+  void clone_wrap(StripObjectHeaderRef old_header,
                   const coll_t &cid, const ghobject_t &oid,
                   KeyValueDB::Transaction t,
-                  StripObjectHeader *origin_header,
-                  StripObjectHeader *target_header);
-  void rename_wrap(const coll_t &cid, const ghobject_t &oid,
+                  StripObjectHeaderRef *target_header);
+  void rename_wrap(StripObjectHeaderRef old_header, const coll_t &cid, const ghobject_t &oid,
                    KeyValueDB::Transaction t,
-                   StripObjectHeader *header);
+                   StripObjectHeaderRef *new_header);
   // Already hold header to avoid lock header seq again
   int get_with_header(
-    const StripObjectHeader &header,
+    const StripObjectHeaderRef header,
     const string &prefix,
     map<string, bufferlist> *out
     );
 
   int get_values_with_header(
-    const StripObjectHeader &header,
+    const StripObjectHeaderRef header,
     const string &prefix,
     const set<string> &keys,
     map<string, bufferlist> *out
     );
   int get_keys_with_header(
-    const StripObjectHeader &header,
+    const StripObjectHeaderRef header,
     const string &prefix,
     set<string> *keys
     );
 
-  StripObjectMap(KeyValueDB *db): GenericObjectMap(db) {}
+  Mutex lock;
+  void invalidate_cache(const coll_t &c, const ghobject_t &oid) {
+    Mutex::Locker l(lock);
+    caches.clear(oid);
+  }
+
+  RandomCache<ghobject_t, pair<coll_t, StripObjectHeaderRef> > caches;
+  StripObjectMap(KeyValueDB *db): GenericObjectMap(db),
+                                  lock("StripObjectMap::lock"),
+                                  caches(g_conf->keyvaluestore_header_cache_size)
+  {}
 };
 
 
@@ -173,8 +177,6 @@ class KeyValueStore : public ObjectStore,
   uuid_d fsid;
 
   int fsid_fd, current_fd;
-
-  enum kvstore_types kv_type;
 
   deque<uint64_t> snaps;
 
@@ -221,37 +223,49 @@ class KeyValueStore : public ObjectStore,
   // 4. Clone or rename
   struct BufferTransaction {
     typedef pair<coll_t, ghobject_t> uniq_id;
-    typedef map<uniq_id, StripObjectMap::StripObjectHeader> StripHeaderMap;
+    typedef map<uniq_id, StripObjectMap::StripObjectHeaderRef> StripHeaderMap;
 
     //Dirty records
     StripHeaderMap strip_headers;
+    list<Context*> finishes;
 
     KeyValueStore *store;
 
     KeyValueDB::Transaction t;
 
     int lookup_cached_header(const coll_t &cid, const ghobject_t &oid,
-                             StripObjectMap::StripObjectHeader **strip_header,
+                             StripObjectMap::StripObjectHeaderRef *strip_header,
                              bool create_if_missing);
-    int get_buffer_keys(StripObjectMap::StripObjectHeader &strip_header,
+    int get_buffer_keys(StripObjectMap::StripObjectHeaderRef strip_header,
                         const string &prefix, const set<string> &keys,
                         map<string, bufferlist> *out);
-    void set_buffer_keys(StripObjectMap::StripObjectHeader &strip_header,
+    void set_buffer_keys(StripObjectMap::StripObjectHeaderRef strip_header,
                          const string &prefix, map<string, bufferlist> &bl);
-    int remove_buffer_keys(StripObjectMap::StripObjectHeader &strip_header,
+    int remove_buffer_keys(StripObjectMap::StripObjectHeaderRef strip_header,
                            const string &prefix, const set<string> &keys);
-    void clear_buffer_keys(StripObjectMap::StripObjectHeader &strip_header,
+    void clear_buffer_keys(StripObjectMap::StripObjectHeaderRef strip_header,
                            const string &prefix);
-    int clear_buffer(StripObjectMap::StripObjectHeader &strip_header);
-    void clone_buffer(StripObjectMap::StripObjectHeader &old_header,
+    int clear_buffer(StripObjectMap::StripObjectHeaderRef strip_header);
+    void clone_buffer(StripObjectMap::StripObjectHeaderRef old_header,
                       const coll_t &cid, const ghobject_t &oid);
-    void rename_buffer(StripObjectMap::StripObjectHeader &old_header,
+    void rename_buffer(StripObjectMap::StripObjectHeaderRef old_header,
                        const coll_t &cid, const ghobject_t &oid);
     int submit_transaction();
 
     BufferTransaction(KeyValueStore *store): store(store) {
       t = store->backend->get_transaction();
     }
+
+    struct InvalidateCacheContext : public Context {
+      KeyValueStore *store;
+      const coll_t cid;
+      const ghobject_t oid;
+      InvalidateCacheContext(KeyValueStore *s, const coll_t &c, const ghobject_t &oid): store(s), cid(c), oid(oid) {}
+      void finish(int r) {
+      if (r == 0)
+        store->backend->invalidate_cache(cid, oid);
+      }
+    };
   };
 
   // -- op workqueue --
@@ -267,10 +281,54 @@ class KeyValueStore : public ObjectStore,
     Mutex qlock; // to protect q, for benefit of flush (peek/dequeue also protected by lock)
     list<Op*> q;
     Cond cond;
+    list<pair<uint64_t, Context*> > flush_commit_waiters;
     uint64_t op; // used by flush() to know the sequence of op
    public:
     Sequencer *parent;
     Mutex apply_lock;  // for apply mutual exclusion
+    
+    /// get_max_uncompleted
+    bool _get_max_uncompleted(
+      uint64_t *seq ///< [out] max uncompleted seq
+      ) {
+      assert(qlock.is_locked());
+      assert(seq);
+      *seq = 0;
+      if (q.empty()) {
+	return true;
+      } else {
+	*seq = q.back()->op;
+	return false;
+      }
+    } /// @returns true if the queue is empty
+
+    /// get_min_uncompleted
+    bool _get_min_uncompleted(
+      uint64_t *seq ///< [out] min uncompleted seq
+      ) {
+      assert(qlock.is_locked());
+      assert(seq);
+      *seq = 0;
+      if (q.empty()) {
+	return true;
+      } else {
+	*seq = q.front()->op;
+	return false;
+      }
+    } /// @returns true if both queues are empty
+
+    void _wake_flush_waiters(list<Context*> *to_queue) {
+      uint64_t seq;
+      if (_get_min_uncompleted(&seq))
+	seq = -1;
+
+      for (list<pair<uint64_t, Context*> >::iterator i =
+	     flush_commit_waiters.begin();
+	   i != flush_commit_waiters.end() && i->first < seq;
+	   flush_commit_waiters.erase(i++)) {
+	to_queue->push_back(i->second);
+      }
+    }
 
     void queue(Op *o) {
       Mutex::Locker l(qlock);
@@ -282,14 +340,19 @@ class KeyValueStore : public ObjectStore,
       assert(apply_lock.is_locked());
       return q.front();
     }
-    Op *dequeue() {
+
+    Op *dequeue(list<Context*> *to_queue) {
+      assert(to_queue);
       assert(apply_lock.is_locked());
       Mutex::Locker l(qlock);
       Op *o = q.front();
       q.pop_front();
       cond.Signal();
+
+      _wake_flush_waiters(to_queue);
       return o;
     }
+
     void flush() {
       Mutex::Locker l(qlock);
 
@@ -303,6 +366,17 @@ class KeyValueStore : public ObjectStore,
         // queues
         while (!q.empty() && q.front()->op <= seq)
           cond.Wait(qlock);
+      }
+    }
+    bool flush_commit(Context *c) {
+      Mutex::Locker l(qlock);
+      uint64_t seq = 0;
+      if (_get_max_uncompleted(&seq)) {
+	delete c;
+	return true;
+      } else {
+	flush_commit_waiters.push_back(make_pair(seq, c));
+	return false;
       }
     }
 
@@ -382,7 +456,6 @@ class KeyValueStore : public ObjectStore,
                 bool update_to=false);
   ~KeyValueStore();
 
-  int _detect_backend() { kv_type = KV_TYPE_LEVELDB; return 0; }
   bool test_mount_in_use();
   int version_stamp_is_valid(uint32_t *version);
   int update_version_stamp();
@@ -397,7 +470,12 @@ class KeyValueStore : public ObjectStore,
   int write_version_stamp();
   int mount();
   int umount();
-  int get_max_object_name_length();
+  unsigned get_max_object_name_length() {
+    return 4096;  // no real limit for leveldb
+  }
+  unsigned get_max_attr_name_length() {
+    return 256;  // arbitrary; there is no real limit internally
+  }
   int mkfs();
   int mkjournal() {return 0;}
 
@@ -435,10 +513,10 @@ class KeyValueStore : public ObjectStore,
   // ------------------
   // objects
 
-  int _generic_read(StripObjectMap::StripObjectHeader &header,
+  int _generic_read(StripObjectMap::StripObjectHeaderRef header,
                     uint64_t offset, size_t len, bufferlist& bl,
                     bool allow_eio = false, BufferTransaction *bt = 0);
-  int _generic_write(StripObjectMap::StripObjectHeader &header,
+  int _generic_write(StripObjectMap::StripObjectHeaderRef header,
                      uint64_t offset, size_t len, const bufferlist& bl,
                      BufferTransaction &t, bool replica = false);
 

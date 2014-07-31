@@ -68,7 +68,7 @@
 #include "common/fd.h"
 #include "HashIndex.h"
 #include "DBObjectMap.h"
-#include "LevelDBStore.h"
+#include "KeyValueDB.h"
 
 #include "common/ceph_crypto.h"
 using ceph::crypto::SHA1;
@@ -258,8 +258,6 @@ int FileStore::lfn_open(coll_t cid,
   }
 
   int fd, exist;
-
-  
   assert(NULL != (*index).index);
   if (need_lock) {
     ((*index).index)->access_lock.get_write();
@@ -697,6 +695,7 @@ void FileStore::create_backend(long f_type)
 	  << dendl;
 
   switch (f_type) {
+#if defined(__linux__)
   case BTRFS_SUPER_MAGIC:
     wbthrottle.set_fs(WBThrottle::BTRFS);
     break;
@@ -710,6 +709,7 @@ void FileStore::create_backend(long f_type)
       assert(m_filestore_replica_fadvise == false);
     }
     break;
+#endif
   }
 
   set_xattr_limits_via_conf();
@@ -792,6 +792,8 @@ int FileStore::mkfs()
     goto close_fsid_fd;
   }
 
+  // superblock
+  superblock.omap_backend = g_conf->filestore_omap_backend;
   ret = write_superblock();
   if (ret < 0) {
     derr << "mkfs: write_superblock() failed: "
@@ -851,21 +853,13 @@ int FileStore::mkfs()
     }
     VOID_TEMP_FAILURE_RETRY(::close(fd));  
   }
-
-  {
-    leveldb::Options options;
-    options.create_if_missing = true;
-    leveldb::DB *db;
-    leveldb::Status status = leveldb::DB::Open(options, omap_dir, &db);
-    if (status.ok()) {
-      delete db;
-      dout(1) << "leveldb db exists/created" << dendl;
-    } else {
-      derr << "mkfs failed to create leveldb: " << status.ToString() << dendl;
-      ret = -1;
-      goto close_fsid_fd;
-    }
+  ret = KeyValueDB::test_init(superblock.omap_backend, omap_dir);
+  if (ret < 0) {
+    derr << "mkfs failed to create " << g_conf->filestore_omap_backend << dendl;
+    ret = -1;
+    goto close_fsid_fd;
   }
+  dout(1) << g_conf->filestore_omap_backend << " db exists/created" << dendl;
 
   // journal?
   ret = mkjournal();
@@ -1427,22 +1421,25 @@ int FileStore::mount()
   }
 
   {
-    LevelDBStore *omap_store = new LevelDBStore(g_ceph_context, omap_dir);
+    KeyValueDB * omap_store = KeyValueDB::create(g_ceph_context,
+						 superblock.omap_backend,
+						 omap_dir);
+    if (omap_store == NULL)
+    {
+      derr << "Error creating " << superblock.omap_backend << dendl;
+      ret = -1;
+      goto close_current_fd;
+    }
 
     omap_store->init();
 
     stringstream err;
     if (omap_store->create_and_open(err)) {
       delete omap_store;
-      derr << "Error initializing leveldb: " << err.str() << dendl;
+      derr << "Error initializing " << superblock.omap_backend
+	   << " : " << err.str() << dendl;
       ret = -1;
       goto close_current_fd;
-    }
-
-    if (g_conf->osd_compact_leveldb_on_mount) {
-      derr << "Compacting store..." << dendl;
-      omap_store->compact();
-      derr << "...finished compacting store" << dendl;
     }
 
     DBObjectMap *dbomap = new DBObjectMap(omap_store);
@@ -1633,21 +1630,6 @@ int FileStore::umount()
 }
 
 
-int FileStore::get_max_object_name_length()
-{
-  lock.Lock();
-  int ret = pathconf(basedir.c_str(), _PC_NAME_MAX);
-  if (ret < 0) {
-    int err = errno;
-    lock.Unlock();
-    if (err == 0)
-      return -EDOM;
-    return -err;
-  }
-  lock.Unlock();
-  return ret;
-}
-
 
 
 /// -----------------------------
@@ -1774,7 +1756,8 @@ void FileStore::_do_op(OpSequencer *osr, ThreadPool::TPHandle &handle)
 
 void FileStore::_finish_op(OpSequencer *osr)
 {
-  Op *o = osr->dequeue();
+  list<Context*> to_queue;
+  Op *o = osr->dequeue(&to_queue);
   
   dout(10) << "_finish_op " << o << " seq " << o->op << " " << *osr << "/" << osr->parent << dendl;
   osr->apply_lock.Unlock();  // locked in _do_op
@@ -1792,6 +1775,7 @@ void FileStore::_finish_op(OpSequencer *osr)
   if (o->onreadable) {
     op_finisher.queue(o->onreadable);
   }
+  op_finisher.queue(to_queue);
   delete o;
 }
 
@@ -1927,7 +1911,8 @@ void FileStore::_journaled_ahead(OpSequencer *osr, Op *o, Context *ondisk)
   // this should queue in order because the journal does it's completions in order.
   queue_op(osr, o);
 
-  osr->dequeue_journal();
+  list<Context*> to_queue;
+  osr->dequeue_journal(&to_queue);
 
   // do ondisk completions async, to prevent any onreadable_sync completions
   // getting blocked behind an ondisk completion.
@@ -1935,6 +1920,7 @@ void FileStore::_journaled_ahead(OpSequencer *osr, Op *o, Context *ondisk)
     dout(10) << " queueing ondisk " << ondisk << dendl;
     ondisk_finisher.queue(ondisk);
   }
+  ondisk_finisher.queue(to_queue);
 }
 
 int FileStore::_do_transactions(
@@ -3790,15 +3776,11 @@ int FileStore::getattrs(coll_t cid, const ghobject_t& oid, map<string,bufferptr>
     goto out;
   }
   {
-    assert(NULL != index.index);
-    RWLock::RLocker l((index.index)->access_lock);
-
     r = object_map->get_all_xattrs(oid, &omap_attrs);
     if (r < 0 && r != -ENOENT) {
       dout(10) << __func__ << " could not get omap_attrs r = " << r << dendl;
       goto out;
     }
-
     r = object_map->get_xattrs(oid, omap_attrs, &omap_aset);
     if (r < 0 && r != -ENOENT) {
       dout(10) << __func__ << " could not get omap_attrs r = " << r << dendl;
@@ -4009,9 +3991,6 @@ int FileStore::_rmattrs(coll_t cid, const ghobject_t& oid,
     goto out_close;
   }
   {
-    assert(NULL != index.index);
-    RWLock::RLocker l((index.index)->access_lock);
-
     r = object_map->get_all_xattrs(oid, &omap_attrs);
     if (r < 0 && r != -ENOENT) {
       dout(10) << __func__ << " could not get omap_attrs r = " << r << dendl;
@@ -4456,13 +4435,13 @@ int FileStore::omap_get(coll_t c, const ghobject_t &hoid,
   int r = get_index(c, &index);
   if (r < 0)
     return r;
-
-  assert(NULL != index.index);
-  RWLock::RLocker l((index.index)->access_lock);
-
-  r = lfn_find(hoid, index);
-  if (r < 0)
-    return r;
+  {
+    assert(NULL != index.index);
+    RWLock::RLocker l((index.index)->access_lock);
+    r = lfn_find(hoid, index);
+    if (r < 0)
+      return r;
+  }
   r = object_map->get(hoid, header, out);
   if (r < 0 && r != -ENOENT) {
     assert(!m_filestore_fail_eio || r != -EIO);
@@ -4482,14 +4461,13 @@ int FileStore::omap_get_header(
   int r = get_index(c, &index);
   if (r < 0)
     return r;
-
-  assert(NULL != index.index);
-  RWLock::RLocker l((index.index)->access_lock);
-
-  r = lfn_find(hoid, index);
-
-  if (r < 0)
-    return r;
+  {
+    assert(NULL != index.index);
+    RWLock::RLocker l((index.index)->access_lock);
+    r = lfn_find(hoid, index);
+    if (r < 0)
+      return r;
+  }
   r = object_map->get_header(hoid, bl);
   if (r < 0 && r != -ENOENT) {
     assert(allow_eio || !m_filestore_fail_eio || r != -EIO);
@@ -4505,14 +4483,13 @@ int FileStore::omap_get_keys(coll_t c, const ghobject_t &hoid, set<string> *keys
   int r = get_index(c, &index);
   if (r < 0)
     return r;
-
-  assert(NULL != index.index);
-  RWLock::RLocker l((index.index)->access_lock);
-
-  r = lfn_find(hoid, index);
-
-  if (r < 0)
-    return r;
+  {
+    assert(NULL != index.index);
+    RWLock::RLocker l((index.index)->access_lock);
+    r = lfn_find(hoid, index);
+    if (r < 0)
+      return r;
+  }
   r = object_map->get_keys(hoid, keys);
   if (r < 0 && r != -ENOENT) {
     assert(!m_filestore_fail_eio || r != -EIO);
@@ -4530,14 +4507,13 @@ int FileStore::omap_get_values(coll_t c, const ghobject_t &hoid,
   int r = get_index(c, &index);
   if (r < 0)
     return r;
-
-  assert(NULL != index.index);
-  RWLock::RLocker l((index.index)->access_lock);
-
-  r = lfn_find(hoid, index);
-
-  if (r < 0)
-    return r;
+  {
+    assert(NULL != index.index);
+    RWLock::RLocker l((index.index)->access_lock);
+    r = lfn_find(hoid, index);
+    if (r < 0)
+      return r;
+  }
   r = object_map->get_values(hoid, keys, out);
   if (r < 0 && r != -ENOENT) {
     assert(!m_filestore_fail_eio || r != -EIO);
@@ -4556,14 +4532,13 @@ int FileStore::omap_check_keys(coll_t c, const ghobject_t &hoid,
   int r = get_index(c, &index);
   if (r < 0)
     return r;
-
-  assert(NULL != index.index);
-  RWLock::RLocker l((index.index)->access_lock);
-
-  r = lfn_find(hoid, index);
-
-  if (r < 0)
-    return r;
+  {
+    assert(NULL != index.index);
+    RWLock::RLocker l((index.index)->access_lock);
+    r = lfn_find(hoid, index);
+    if (r < 0)
+      return r;
+  }
   r = object_map->check_keys(hoid, keys, out);
   if (r < 0 && r != -ENOENT) {
     assert(!m_filestore_fail_eio || r != -EIO);
@@ -4580,14 +4555,13 @@ ObjectMap::ObjectMapIterator FileStore::get_omap_iterator(coll_t c,
   int r = get_index(c, &index);
   if (r < 0)
     return ObjectMap::ObjectMapIterator(); 
-
-  assert(NULL != index.index);
-  RWLock::RLocker l((index.index)->access_lock);
-
-  r = lfn_find(hoid, index);
-
-  if (r < 0)
-    return ObjectMap::ObjectMapIterator();
+  {
+    assert(NULL != index.index);
+    RWLock::RLocker l((index.index)->access_lock);
+    r = lfn_find(hoid, index);
+    if (r < 0)
+      return ObjectMap::ObjectMapIterator();
+  }
   return object_map->get_iterator(hoid);
 }
 
@@ -4813,14 +4787,13 @@ int FileStore::_omap_clear(coll_t cid, const ghobject_t &hoid,
   int r = get_index(cid, &index);
   if (r < 0)
     return r;
-
-  assert(NULL != index.index);
-  RWLock::RLocker l((index.index)->access_lock);
-
-  r = lfn_find(hoid, index);
-
-  if (r < 0)
-    return r;
+  {
+    assert(NULL != index.index);
+    RWLock::RLocker l((index.index)->access_lock);
+    r = lfn_find(hoid, index);
+    if (r < 0)
+      return r;
+  }
   r = object_map->clear_keys_header(hoid, &spos);
   if (r < 0 && r != -ENOENT)
     return r;
@@ -4835,14 +4808,13 @@ int FileStore::_omap_setkeys(coll_t cid, const ghobject_t &hoid,
   int r = get_index(cid, &index);
   if (r < 0)
     return r;
-
-  assert(NULL != index.index);
-  RWLock::RLocker l((index.index)->access_lock);
-
-  r = lfn_find(hoid, index);
-
-  if (r < 0)
-    return r;
+  {
+    assert(NULL != index.index);
+    RWLock::RLocker l((index.index)->access_lock);
+    r = lfn_find(hoid, index);
+    if (r < 0)
+      return r;
+  }
   return object_map->set_keys(hoid, aset, &spos);
 }
 
@@ -4854,14 +4826,13 @@ int FileStore::_omap_rmkeys(coll_t cid, const ghobject_t &hoid,
   int r = get_index(cid, &index);
   if (r < 0)
     return r;
-
-  assert(NULL != index.index);
-  RWLock::RLocker l((index.index)->access_lock);
-
-  r = lfn_find(hoid, index);
-
-  if (r < 0)
-    return r;
+  {
+    assert(NULL != index.index);
+    RWLock::RLocker l((index.index)->access_lock);
+    r = lfn_find(hoid, index);
+    if (r < 0)
+      return r;
+  }
   r = object_map->rm_keys(hoid, keys, &spos);
   if (r < 0 && r != -ENOENT)
     return r;
@@ -4894,14 +4865,13 @@ int FileStore::_omap_setheader(coll_t cid, const ghobject_t &hoid,
   int r = get_index(cid, &index);
   if (r < 0)
     return r;
-
-  assert(NULL != index.index);
-  RWLock::RLocker l((index.index)->access_lock);
-
-  r = lfn_find(hoid, index);
-
-  if (r < 0)
-    return r;
+  {
+    assert(NULL != index.index);
+    RWLock::RLocker l((index.index)->access_lock);
+    r = lfn_find(hoid, index);
+    if (r < 0)
+      return r;
+  }
   return object_map->set_header(hoid, bl, &spos);
 }
 
@@ -5200,6 +5170,7 @@ void FileStore::set_xattr_limits_via_conf()
   uint32_t fs_xattrs;
 
   switch (m_fs_type) {
+#if defined(__linux__)
   case XFS_SUPER_MAGIC:
     fs_xattr_size = g_conf->filestore_max_inline_xattr_size_xfs;
     fs_xattrs = g_conf->filestore_max_inline_xattrs_xfs;
@@ -5208,6 +5179,7 @@ void FileStore::set_xattr_limits_via_conf()
     fs_xattr_size = g_conf->filestore_max_inline_xattr_size_btrfs;
     fs_xattrs = g_conf->filestore_max_inline_xattrs_btrfs;
     break;
+#endif
   default:
     fs_xattr_size = g_conf->filestore_max_inline_xattr_size_other;
     fs_xattrs = g_conf->filestore_max_inline_xattrs_other;
@@ -5231,15 +5203,20 @@ void FileStore::set_xattr_limits_via_conf()
 
 void FSSuperblock::encode(bufferlist &bl) const
 {
-  ENCODE_START(1, 1, bl);
+  ENCODE_START(2, 1, bl);
   compat_features.encode(bl);
+  ::encode(omap_backend, bl);
   ENCODE_FINISH(bl);
 }
 
 void FSSuperblock::decode(bufferlist::iterator &bl)
 {
-  DECODE_START(1, bl);
+  DECODE_START(2, bl);
   compat_features.decode(bl);
+  if (struct_v >= 2)
+    ::decode(omap_backend, bl);
+  else
+    omap_backend = "leveldb";
   DECODE_FINISH(bl);
 }
 
@@ -5247,6 +5224,7 @@ void FSSuperblock::dump(Formatter *f) const
 {
   f->open_object_section("compat");
   compat_features.dump(f);
+  f->dump_string("omap_backend", omap_backend);
   f->close_section();
 }
 
@@ -5260,5 +5238,7 @@ void FSSuperblock::generate_test_instances(list<FSSuperblock*>& o)
   feature_incompat.insert(CEPH_FS_FEATURE_INCOMPAT_SHARDS);
   z.compat_features = CompatSet(feature_compat, feature_ro_compat,
                                 feature_incompat);
+  o.push_back(new FSSuperblock(z));
+  z.omap_backend = "rocksdb";
   o.push_back(new FSSuperblock(z));
 }

@@ -3,6 +3,7 @@
 set -e
 set -o functrace
 PS4=' ${FUNCNAME[0]}: $LINENO: '
+SUDO=${SUDO:-sudo}
 
 function get_pg()
 {
@@ -58,7 +59,7 @@ function get_config_value_or_die()
   target=$1
   config_opt=$2
 
-  raw="`ceph daemon $target config get $config_opt 2>/dev/null`"
+  raw="`$SUDO ceph daemon $target config get $config_opt 2>/dev/null`"
   if [[ $? -ne 0 ]]; then
     echo "error obtaining config opt '$config_opt' from '$target': $raw"
     exit 1
@@ -95,13 +96,13 @@ function test_mon_injectargs_SI()
   # Keep in mind that all integer based options (i.e., INT,
   # LONG, U32, U64) will accept SI unit modifiers.
   initial_value=$(get_config_value_or_die "mon.a" "mon_pg_warn_min_objects")
-  ceph daemon mon.a config set mon_pg_warn_min_objects 10
+  $SUDO ceph daemon mon.a config set mon_pg_warn_min_objects 10
   expect_config_value "mon.a" "mon_pg_warn_min_objects" 10
-  ceph daemon mon.a config set mon_pg_warn_min_objects 10K
+  $SUDO ceph daemon mon.a config set mon_pg_warn_min_objects 10K
   expect_config_value "mon.a" "mon_pg_warn_min_objects" 10240
-  ceph daemon mon.a config set mon_pg_warn_min_objects 1G
+  $SUDO ceph daemon mon.a config set mon_pg_warn_min_objects 1G
   expect_config_value "mon.a" "mon_pg_warn_min_objects" 1073741824
-  ceph daemon mon.a config set mon_pg_warn_min_objects 10F > $TMPFILE || true
+  $SUDO ceph daemon mon.a config set mon_pg_warn_min_objects 10F > $TMPFILE || true
   check_response "'10F': (22) Invalid argument"
   # now test with injectargs
   ceph tell mon.a injectargs '--mon_pg_warn_min_objects 10'
@@ -111,17 +112,19 @@ function test_mon_injectargs_SI()
   ceph tell mon.a injectargs '--mon_pg_warn_min_objects 1G'
   expect_config_value "mon.a" "mon_pg_warn_min_objects" 1073741824
   expect_false ceph injectargs mon.a '--mon_pg_warn_min_objects 10F'
-  ceph daemon mon.a config set mon_pg_warn_min_objects $initial_value
+  $SUDO ceph daemon mon.a config set mon_pg_warn_min_objects $initial_value
 }
 
 function test_tiering()
 {
   # tiering
+  ceph osd pool create slow 2
+  ceph osd pool create slow2 2
   ceph osd pool create cache 2
   ceph osd pool create cache2 2
-  ceph osd tier add data cache
-  ceph osd tier add data cache2
-  expect_false ceph osd tier add metadata cache
+  ceph osd tier add slow cache
+  ceph osd tier add slow cache2
+  expect_false ceph osd tier add slow2 cache
   # test some state transitions
   ceph osd tier cache-mode cache writeback
   ceph osd tier cache-mode cache forward
@@ -158,19 +161,19 @@ function test_tiering()
   done
   expect_false ceph osd pool set cache pg_num 4
   ceph osd tier cache-mode cache none
-  ceph osd tier set-overlay data cache
-  expect_false ceph osd tier set-overlay data cache2
-  expect_false ceph osd tier remove data cache
-  ceph osd tier remove-overlay data
-  ceph osd tier set-overlay data cache2
-  ceph osd tier remove-overlay data
-  ceph osd tier remove data cache
-  ceph osd tier add metadata cache
-  expect_false ceph osd tier set-overlay data cache
-  ceph osd tier set-overlay metadata cache
-  ceph osd tier remove-overlay metadata
-  ceph osd tier remove metadata cache
-  ceph osd tier remove data cache2
+  ceph osd tier set-overlay slow cache
+  expect_false ceph osd tier set-overlay slow cache2
+  expect_false ceph osd tier remove slow cache
+  ceph osd tier remove-overlay slow
+  ceph osd tier set-overlay slow cache2
+  ceph osd tier remove-overlay slow
+  ceph osd tier remove slow cache
+  ceph osd tier add slow2 cache
+  expect_false ceph osd tier set-overlay slow cache
+  ceph osd tier set-overlay slow2 cache
+  ceph osd tier remove-overlay slow2
+  ceph osd tier remove slow2 cache
+  ceph osd tier remove slow cache2
 
   # make sure a non-empty pool fails
   rados -p cache2 put /etc/passwd /etc/passwd
@@ -178,19 +181,22 @@ function test_tiering()
     echo waiting for pg stats to flush
     sleep 2
   done
-  expect_false ceph osd tier add data cache2
-  ceph osd tier add data cache2 --force-nonempty
-  ceph osd tier remove data cache2
+  expect_false ceph osd tier add slow cache2
+  ceph osd tier add slow cache2 --force-nonempty
+  ceph osd tier remove slow cache2
 
   ceph osd pool delete cache cache --yes-i-really-really-mean-it
   ceph osd pool delete cache2 cache2 --yes-i-really-really-mean-it
 
   # convenient add-cache command
   ceph osd pool create cache3 2
-  ceph osd tier add-cache data cache3 1024000
+  ceph osd tier add-cache slow cache3 1024000
   ceph osd dump | grep cache3 | grep bloom | grep 'false_positive_probability: 0.05' | grep 'target_bytes 1024000' | grep '1200s x4'
-  ceph osd tier remove data cache3
+  ceph osd tier remove slow cache3
   ceph osd pool delete cache3 cache3 --yes-i-really-really-mean-it
+
+  ceph osd pool delete slow2 slow2 --yes-i-really-really-mean-it
+  ceph osd pool delete slow slow --yes-i-really-really-mean-it
 
   # protection against pool removal when used as tiers
   ceph osd pool create datapool 2
@@ -205,7 +211,9 @@ function test_tiering()
   ceph osd pool delete datapool datapool --yes-i-really-really-mean-it
 
   # check health check
+  ceph osd pool create datapool 2
   ceph osd pool create cache4 2
+  ceph osd tier add datapool cache4
   ceph osd pool set cache4 target_max_objects 5
   ceph osd pool set cache4 target_max_bytes 1000
   for f in `seq 1 5` ; do
@@ -218,7 +226,40 @@ function test_tiering()
   ceph health | grep WARN | grep cache4
   ceph health detail | grep cache4 | grep 'target max' | grep objects
   ceph health detail | grep cache4 | grep 'target max' | grep 'B'
+  ceph osd tier remove datapool cache4
   ceph osd pool delete cache4 cache4 --yes-i-really-really-mean-it
+  ceph osd pool delete datapool datapool --yes-i-really-really-mean-it
+
+  # make sure 'tier remove' behaves as we expect
+  # i.e., removing a tier from a pool that's not its base pool only
+  # results in a 'pool foo is now (or already was) not a tier of bar'
+  #
+  ceph osd pool create basepoolA 2
+  ceph osd pool create basepoolB 2
+  poolA_id=$(ceph osd dump | grep 'pool.*basepoolA' | awk '{print $2;}')
+  poolB_id=$(ceph osd dump | grep 'pool.*basepoolB' | awk '{print $2;}')
+
+  ceph osd pool create cache5 2
+  ceph osd pool create cache6 2
+  ceph osd tier add basepoolA cache5
+  ceph osd tier add basepoolB cache6
+  ceph osd tier remove basepoolB cache5 2>&1 | grep 'not a tier of'
+  ceph osd dump | grep "pool.*'cache5'" 2>&1 | grep "tier_of[ \t]\+$poolA_id"
+  ceph osd tier remove basepoolA cache6 2>&1 | grep 'not a tier of'
+  ceph osd dump | grep "pool.*'cache6'" 2>&1 | grep "tier_of[ \t]\+$poolB_id"
+
+  ceph osd tier remove basepoolA cache5 2>&1 | grep 'not a tier of'
+  ! ceph osd dump | grep "pool.*'cache5'" 2>&1 | grep "tier_of"
+  ceph osd tier remove basepoolB cache6 2>&1 | grep 'not a tier of'
+  ! ceph osd dump | grep "pool.*'cache6'" 2>&1 | grep "tier_of"
+
+  ! ceph osd dump | grep "pool.*'basepoolA'" 2>&1 | grep "tiers"
+  ! ceph osd dump | grep "pool.*'basepoolB'" 2>&1 | grep "tiers"
+
+  ceph osd pool delete cache6 cache6 --yes-i-really-really-mean-it
+  ceph osd pool delete cache5 cache5 --yes-i-really-really-mean-it
+  ceph osd pool delete basepoolB basepoolB --yes-i-really-really-mean-it
+  ceph osd pool delete basepoolA basepoolA --yes-i-really-really-mean-it
 }
 
 
@@ -289,8 +330,38 @@ function test_mon_misc()
 }
 
 
+function fail_all_mds()
+{
+  ceph mds cluster_down
+  mds_gids=`ceph mds dump | grep up: | while read line ; do echo $line | awk '{print substr($1, 0, length($1)-1);}' ; done`
+  for mds_gid in $mds_gids ; do
+      ceph mds fail $mds_gid
+  done
+}
+
 function test_mon_mds()
 {
+  existing_fs=$(ceph fs ls | grep "name:" | awk '{print substr($2,0,length($2)-1);}')
+  num_mds=$(ceph mds stat | awk '{print $2;}' | cut -f1 -d'/')
+  if [ -n "$existing_fs" ] ; then
+      fail_all_mds
+      echo "Removing existing filesystem '${existing_fs}'..."
+      ceph fs rm $existing_fs --yes-i-really-mean-it
+      echo "Removed '${existing_fs}'."
+  fi
+
+  ceph osd pool create fs_data 10
+  ceph osd pool create fs_metadata 10
+  ceph fs new cephfs fs_metadata fs_data
+
+  # We don't want any MDSs to be up, their activity can interfere with
+  # the "current_epoch + 1" checking below if they're generating updates
+  fail_all_mds
+
+  # Check for default crash_replay_interval set automatically in 'fs new'
+  ceph osd dump | grep fs_data > $TMPFILE
+  check_response "crash_replay_interval 45 "
+
   ceph mds cluster_down
   ceph mds cluster_up
 
@@ -308,14 +379,16 @@ function test_mon_mds()
   ceph mds setmap -i $mdsmapfile $epoch
   rm $mdsmapfile
 
-  ceph mds newfs 0 1 --yes-i-really-mean-it
   ceph osd pool create data2 10
-  poolnum=$(ceph osd dump | grep 'pool.*data2' | awk '{print $2;}')
-  ceph mds add_data_pool $poolnum
-  ceph mds add_data_pool rbd
-  ceph mds remove_data_pool $poolnum
-  ceph mds remove_data_pool rbd
+  ceph osd pool create data3 10
+  data2_pool=$(ceph osd dump | grep 'pool.*data2' | awk '{print $2;}')
+  data3_pool=$(ceph osd dump | grep 'pool.*data3' | awk '{print $2;}')
+  ceph mds add_data_pool $data2_pool
+  ceph mds add_data_pool $data3_pool
+  ceph mds remove_data_pool $data2_pool
+  ceph mds remove_data_pool $data3_pool
   ceph osd pool delete data2 data2 --yes-i-really-really-mean-it
+  ceph osd pool delete data3 data3 --yes-i-really-really-mean-it
   ceph mds set_max_mds 4
   ceph mds set_max_mds 3
   ceph mds set max_mds 4
@@ -347,13 +420,25 @@ function test_mon_mds()
   ceph mds add_data_pool mds-ec-pool 2>$TMPFILE
   check_response 'erasure-code' $? 22
   set -e
-  poolnum=$(ceph osd dump | grep 'pool.*mds-ec-pool' | awk '{print $2;}')
+  ec_poolnum=$(ceph osd dump | grep "pool.* 'mds-ec-pool" | awk '{print $2;}')
+  data_poolnum=$(ceph osd dump | grep "pool.* 'fs_data" | awk '{print $2;}')
+  metadata_poolnum=$(ceph osd dump | grep "pool.* 'fs_metadata" | awk '{print $2;}')
+
+  fail_all_mds
+  ceph fs rm cephfs --yes-i-really-mean-it
+
   set +e
-  ceph mds newfs 0 $poolnum --yes-i-really-mean-it 2>$TMPFILE
+  ceph mds newfs $metadata_poolnum $ec_poolnum --yes-i-really-mean-it 2>$TMPFILE
   check_response 'erasure-code' $? 22
-  ceph mds newfs $poolnum 1 --yes-i-really-mean-it 2>$TMPFILE
+  ceph mds newfs $ec_poolnum $data_poolnum --yes-i-really-mean-it 2>$TMPFILE
   check_response 'erasure-code' $? 22
-  ceph mds newfs $poolnum $poolnum --yes-i-really-mean-it 2>$TMPFILE
+  ceph mds newfs $ec_poolnum $ec_poolnum --yes-i-really-mean-it 2>$TMPFILE
+  check_response 'erasure-code' $? 22
+  ceph fs new cephfs fs_metadata mds-ec-pool 2>$TMPFILE
+  check_response 'erasure-code' $? 22
+  ceph fs new cephfs mds-ec-pool fs_data 2>$TMPFILE
+  check_response 'erasure-code' $? 22
+  ceph fs new cephfs mds-ec-pool mds-ec-pool 2>$TMPFILE
   check_response 'erasure-code' $? 22
   set -e
   ceph osd pool delete mds-ec-pool mds-ec-pool --yes-i-really-really-mean-it
@@ -364,6 +449,9 @@ function test_mon_mds()
   # ceph mds rmfailed
   # ceph mds set_state
   # ceph mds stop
+
+  ceph osd pool delete fs_data fs_data --yes-i-really-really-mean-it
+  ceph osd pool delete fs_metadata fs_metadata --yes-i-really-really-mean-it
 }
 
 function test_mon_mon()
@@ -490,8 +578,10 @@ function test_mon_osd()
   ceph osd rm $id
 
   ceph osd ls
+  ceph osd pool create data 10
   ceph osd lspools | grep data
   ceph osd map data foo | grep 'pool.*data.*object.*foo.*pg.*up.*acting'
+  ceph osd pool delete data data --yes-i-really-really-mean-it
 
   ceph osd pause
   ceph osd dump | grep 'flags pauserd,pausewr'
@@ -507,9 +597,11 @@ function test_mon_osd_pool()
   #
   # osd pool
   #
+  ceph osd pool create data 10
   ceph osd pool mksnap data datasnap
   rados -p data lssnap | grep datasnap
   ceph osd pool rmsnap data datasnap
+  ceph osd pool delete data data --yes-i-really-really-mean-it
 
   ceph osd pool create data2 10
   ceph osd pool rename data2 data3
@@ -524,6 +616,52 @@ function test_mon_osd_pool()
   expect_false ceph osd pool create replicated 12 12 erasure
   ceph osd lspools | grep replicated
   ceph osd pool delete replicated replicated --yes-i-really-really-mean-it
+}
+
+function test_mon_osd_pool_quota()
+{
+  #
+  # test osd pool set/get quota
+  #
+
+  # create tmp pool
+  ceph osd pool create tmp-quota-pool 36
+  #
+  # set erroneous quotas
+  #
+  expect_false ceph osd pool set-quota tmp-quota-pool max_fooness 10
+  expect_false ceph osd pool set-quota tmp-quota-pool max_bytes -1
+  expect_false ceph osd pool set-quota tmp-quota-pool max_objects aaa
+  #
+  # set valid quotas
+  #
+  ceph osd pool set-quota tmp-quota-pool max_bytes 10
+  ceph osd pool set-quota tmp-quota-pool max_objects 10M
+  #
+  # get quotas
+  #
+  ceph osd pool get-quota tmp-quota-pool | grep 'max bytes.*10B'
+  ceph osd pool get-quota tmp-quota-pool | grep 'max objects.*10240k objects'
+  #
+  # get quotas in json-pretty format
+  #
+  ceph osd pool get-quota tmp-quota-pool --format=json-pretty | \
+    grep '"quota_max_objects":.*10485760'
+  ceph osd pool get-quota tmp-quota-pool --format=json-pretty | \
+    grep '"quota_max_bytes":.*10'
+  #
+  # reset pool quotas
+  #
+  ceph osd pool set-quota tmp-quota-pool max_bytes 0
+  ceph osd pool set-quota tmp-quota-pool max_objects 0
+  #
+  # test N/A quotas
+  #
+  ceph osd pool get-quota tmp-quota-pool | grep 'max bytes.*N/A'
+  ceph osd pool get-quota tmp-quota-pool | grep 'max objects.*N/A'
+  #
+  # cleanup tmp pool
+  ceph osd pool delete tmp-quota-pool tmp-quota-pool --yes-i-really-really-mean-it
 }
 
 function test_mon_pg()
@@ -599,64 +737,127 @@ function test_mon_pg()
 
 function test_mon_osd_pool_set()
 {
+  TEST_POOL_GETSET=pool_getset
+  ceph osd pool create $TEST_POOL_GETSET 10
 
   for s in pg_num pgp_num size min_size crash_replay_interval crush_ruleset; do
-    ceph osd pool get data $s
+    ceph osd pool get $TEST_POOL_GETSET $s
   done
 
-  old_size=$(ceph osd pool get data size | sed -e 's/size: //')
+  old_size=$(ceph osd pool get $TEST_POOL_GETSET size | sed -e 's/size: //')
   (( new_size = old_size + 1 ))
-  ceph osd pool set data size $new_size
-  ceph osd pool get data size | grep "size: $new_size"
-  ceph osd pool set data size $old_size
+  ceph osd pool set $TEST_POOL_GETSET size $new_size
+  ceph osd pool get $TEST_POOL_GETSET size | grep "size: $new_size"
+  ceph osd pool set $TEST_POOL_GETSET size $old_size
 
   ceph osd pool create pool_erasure 12 12 erasure
   set +e
   ceph osd pool set pool_erasure size 4444 2>$TMPFILE
   check_response 'not change the size'
   set -e
+  ceph osd pool get pool_erasure erasure_code_profile
 
   auid=5555
-  ceph osd pool set data auid $auid
-  ceph osd pool get data auid | grep $auid
-  ceph --format=xml osd pool get data auid | grep $auid
-  ceph osd pool set data auid 0
+  ceph osd pool set $TEST_POOL_GETSET auid $auid
+  ceph osd pool get $TEST_POOL_GETSET auid | grep $auid
+  ceph --format=xml osd pool get $TEST_POOL_GETSET auid | grep $auid
+  ceph osd pool set $TEST_POOL_GETSET auid 0
 
-  ceph osd pool set data hashpspool true
-  ceph osd pool set data hashpspool false
-  ceph osd pool set data hashpspool 0
-  ceph osd pool set data hashpspool 1
-  expect_false ceph osd pool set data hashpspool asdf
-  expect_false ceph osd pool set data hashpspool 2
+  ceph osd pool set $TEST_POOL_GETSET hashpspool true
+  ceph osd pool set $TEST_POOL_GETSET hashpspool false
+  ceph osd pool set $TEST_POOL_GETSET hashpspool 0
+  ceph osd pool set $TEST_POOL_GETSET hashpspool 1
+  expect_false ceph osd pool set $TEST_POOL_GETSET hashpspool asdf
+  expect_false ceph osd pool set $TEST_POOL_GETSET hashpspool 2
 
-  ceph osd pool set rbd hit_set_type explicit_hash
-  ceph osd pool get rbd hit_set_type | grep "hit_set_type: explicit_hash"
-  ceph osd pool set rbd hit_set_type explicit_object
-  ceph osd pool get rbd hit_set_type | grep "hit_set_type: explicit_object"
-  ceph osd pool set rbd hit_set_type bloom
-  ceph osd pool get rbd hit_set_type | grep "hit_set_type: bloom"
-  expect_false ceph osd pool set rbd hit_set_type i_dont_exist
-  ceph osd pool set rbd hit_set_period 123
-  ceph osd pool get rbd hit_set_period | grep "hit_set_period: 123"
-  ceph osd pool set rbd hit_set_count 12
-  ceph osd pool get rbd hit_set_count | grep "hit_set_count: 12"
-  ceph osd pool set rbd hit_set_fpp .01
-  ceph osd pool get rbd hit_set_fpp | grep "hit_set_fpp: 0.01"
-
-  ceph osd pool set rbd target_max_objects 123
-  ceph osd pool set rbd target_max_bytes 123456
-  ceph osd pool set rbd cache_target_dirty_ratio .123
-  expect_false ceph osd pool set rbd cache_target_dirty_ratio -.2
-  expect_false ceph osd pool set rbd cache_target_dirty_ratio 1.1
-  ceph osd pool set rbd cache_target_full_ratio .123
-  ceph osd dump -f json-pretty | grep '"cache_target_full_ratio_micro": 123000'
-  ceph osd pool set rbd cache_target_full_ratio 1.0
-  ceph osd pool set rbd cache_target_full_ratio 0
-  expect_false ceph osd pool set rbd cache_target_full_ratio 1.1
-  ceph osd pool set rbd cache_min_flush_age 123
-  ceph osd pool set rbd cache_min_evict_age 234
+  ceph osd pool delete $TEST_POOL_GETSET $TEST_POOL_GETSET --yes-i-really-really-mean-it
 
   ceph osd pool get rbd crush_ruleset | grep 'crush_ruleset: 0'
+}
+
+function test_mon_osd_tiered_pool_set()
+{
+  # this is really a tier pool
+  ceph osd pool create real-tier 2
+  ceph osd tier add rbd real-tier
+
+  ceph osd pool set real-tier hit_set_type explicit_hash
+  ceph osd pool get real-tier hit_set_type | grep "hit_set_type: explicit_hash"
+  ceph osd pool set real-tier hit_set_type explicit_object
+  ceph osd pool get real-tier hit_set_type | grep "hit_set_type: explicit_object"
+  ceph osd pool set real-tier hit_set_type bloom
+  ceph osd pool get real-tier hit_set_type | grep "hit_set_type: bloom"
+  expect_false ceph osd pool set real-tier hit_set_type i_dont_exist
+  ceph osd pool set real-tier hit_set_period 123
+  ceph osd pool get real-tier hit_set_period | grep "hit_set_period: 123"
+  ceph osd pool set real-tier hit_set_count 12
+  ceph osd pool get real-tier hit_set_count | grep "hit_set_count: 12"
+  ceph osd pool set real-tier hit_set_fpp .01
+  ceph osd pool get real-tier hit_set_fpp | grep "hit_set_fpp: 0.01"
+
+  ceph osd pool set real-tier target_max_objects 123
+  ceph osd pool get real-tier target_max_objects | \
+    grep 'target_max_objects:[ \t]\+123'
+  ceph osd pool set real-tier target_max_bytes 123456
+  ceph osd pool get real-tier target_max_bytes | \
+    grep 'target_max_bytes:[ \t]\+123456'
+  ceph osd pool set real-tier cache_target_dirty_ratio .123
+  ceph osd pool get real-tier cache_target_dirty_ratio | \
+    grep 'cache_target_dirty_ratio:[ \t]\+0.123'
+  expect_false ceph osd pool set real-tier cache_target_dirty_ratio -.2
+  expect_false ceph osd pool set real-tier cache_target_dirty_ratio 1.1
+  ceph osd pool set real-tier cache_target_full_ratio .123
+  ceph osd pool get real-tier cache_target_full_ratio | \
+    grep 'cache_target_full_ratio:[ \t]\+0.123'
+  ceph osd dump -f json-pretty | grep '"cache_target_full_ratio_micro": 123000'
+  ceph osd pool set real-tier cache_target_full_ratio 1.0
+  ceph osd pool set real-tier cache_target_full_ratio 0
+  expect_false ceph osd pool set real-tier cache_target_full_ratio 1.1
+  ceph osd pool set real-tier cache_min_flush_age 123
+  ceph osd pool get real-tier cache_min_flush_age | \
+    grep 'cache_min_flush_age:[ \t]\+123'
+  ceph osd pool set real-tier cache_min_evict_age 234
+  ceph osd pool get real-tier cache_min_evict_age | \
+    grep 'cache_min_evict_age:[ \t]\+234'
+
+  # this is not a tier pool
+  ceph osd pool create fake-tier 2
+
+  expect_false ceph osd pool set fake-tier hit_set_type explicit_hash
+  expect_false ceph osd pool get fake-tier hit_set_type
+  expect_false ceph osd pool set fake-tier hit_set_type explicit_object
+  expect_false ceph osd pool get fake-tier hit_set_type
+  expect_false ceph osd pool set fake-tier hit_set_type bloom
+  expect_false ceph osd pool get fake-tier hit_set_type
+  expect_false ceph osd pool set fake-tier hit_set_type i_dont_exist
+  expect_false ceph osd pool set fake-tier hit_set_period 123
+  expect_false ceph osd pool get fake-tier hit_set_period
+  expect_false ceph osd pool set fake-tier hit_set_count 12
+  expect_false ceph osd pool get fake-tier hit_set_count
+  expect_false ceph osd pool set fake-tier hit_set_fpp .01
+  expect_false ceph osd pool get fake-tier hit_set_fpp
+
+  expect_false ceph osd pool set fake-tier target_max_objects 123
+  expect_false ceph osd pool get fake-tier target_max_objects
+  expect_false ceph osd pool set fake-tier target_max_bytes 123456
+  expect_false ceph osd pool get fake-tier target_max_bytes
+  expect_false ceph osd pool set fake-tier cache_target_dirty_ratio .123
+  expect_false ceph osd pool get fake-tier cache_target_dirty_ratio
+  expect_false ceph osd pool set fake-tier cache_target_dirty_ratio -.2
+  expect_false ceph osd pool set fake-tier cache_target_dirty_ratio 1.1
+  expect_false ceph osd pool set fake-tier cache_target_full_ratio .123
+  expect_false ceph osd pool get fake-tier cache_target_full_ratio
+  expect_false ceph osd pool set fake-tier cache_target_full_ratio 1.0
+  expect_false ceph osd pool set fake-tier cache_target_full_ratio 0
+  expect_false ceph osd pool set fake-tier cache_target_full_ratio 1.1
+  expect_false ceph osd pool set fake-tier cache_min_flush_age 123
+  expect_false ceph osd pool get fake-tier cache_min_flush_age
+  expect_false ceph osd pool set fake-tier cache_min_evict_age 234
+  expect_false ceph osd pool get fake-tier cache_min_evict_age
+
+  ceph osd tier remove rbd real-tier
+  ceph osd pool delete real-tier real-tier --yes-i-really-really-mean-it
+  ceph osd pool delete fake-tier fake-tier --yes-i-really-really-mean-it
 }
 
 function test_mon_osd_erasure_code()
@@ -779,8 +980,10 @@ TESTS=(
   mon_mon
   mon_osd
   mon_osd_pool
+  mon_osd_pool_quota
   mon_pg
   mon_osd_pool_set
+  mon_osd_tiered_pool_set
   mon_osd_erasure_code
   mon_osd_misc
   mon_heap_profiler
@@ -812,6 +1015,9 @@ while [[ $# -gt 0 ]]; do
   case "$opt" in
     "-l" )
       do_list=1
+      ;;
+    "--asok-does-not-need-root" )
+      SUDO=""
       ;;
     "-t" )
       shift

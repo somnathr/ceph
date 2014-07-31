@@ -2104,7 +2104,7 @@ void Monitor::get_cluster_status(stringstream &ss, Formatter *f)
     ss << "     health " << health << "\n";
     ss << "     monmap " << *monmap << ", election epoch " << get_epoch()
        << ", quorum " << get_quorum() << " " << get_quorum_names() << "\n";
-    if (mdsmon()->mdsmap.get_epoch() > 1)
+    if (mdsmon()->mdsmap.get_enabled())
       ss << "     mdsmap " << mdsmon()->mdsmap << "\n";
     osdmon()->osdmap.print_summary(NULL, ss);
     pgmon()->pg_map.print_summary(NULL, &ss);
@@ -2316,7 +2316,7 @@ void Monitor::handle_command(MMonCommand *m)
     return;
   }
 
-  if (module == "mds") {
+  if (module == "mds" || module == "fs") {
     mdsmon()->dispatch(m);
     return;
   }
@@ -2633,7 +2633,7 @@ void Monitor::handle_forward(MForward *m)
     dout(0) << "forward from entity with insufficient caps! " 
 	    << session->caps << dendl;
   } else {
-    Connection *c = new Connection(NULL);  // msgr must be null; see PaxosService::dispatch()
+    Connection *c = new Connection(g_ceph_context, NULL);  // msgr must be null; see PaxosService::dispatch()
     MonSession *s = new MonSession(m->msg->get_source_inst(), c);
     c->set_priv(s);
     c->set_peer_addr(m->client.addr);
