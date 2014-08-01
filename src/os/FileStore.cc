@@ -3713,9 +3713,6 @@ int FileStore::getattr(coll_t cid, const ghobject_t& oid, const char *name, buff
       dout(10) << __func__ << " could not get index r = " << r << dendl;
       goto out;
     }
-    assert(NULL != index.index);
-    RWLock::RLocker l((index.index)->access_lock);
-
     r = object_map->get_xattrs(oid, to_get, &got);
     if (r < 0 && r != -ENOENT) {
       dout(10) << __func__ << " get_xattrs err r =" << r << dendl;
@@ -3928,9 +3925,6 @@ int FileStore::_rmattr(coll_t cid, const ghobject_t& oid, const char *name,
       dout(10) << __func__ << " could not get index r = " << r << dendl;
       goto out_close;
     }
-    assert(NULL != index.index);
-    RWLock::RLocker l((index.index)->access_lock);
-
     set<string> to_remove;
     to_remove.insert(string(name));
     r = object_map->remove_xattrs(oid, to_remove, &spos);
