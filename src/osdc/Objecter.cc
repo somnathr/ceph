@@ -2100,9 +2100,6 @@ int Objecter::create_pool(string& name, Context *onfinish, uint64_t auid,
 {
   ldout(cct, 10) << "create_pool name=" << name << dendl;
 
-  if (osdmap->lookup_pg_pool_name(name.c_str()) >= 0)
-    return -EEXIST;
-
   PoolOp *op = new PoolOp;
   if (!op)
     return -ENOMEM;
