@@ -23,6 +23,7 @@
 #include "common/Cond.h"
 #include "common/shared_cache.hpp"
 #include "include/compat.h"
+#include "include/intarith.h"
 
 /**
  * FD Cache
@@ -60,7 +61,8 @@ public:
     cct->_conf->add_observer(this);
     registry = new SharedLRU<ghobject_t, FD>[registry_shards];
     for (int i = 0; i < registry_shards; ++i) {
-      registry[i].set_size(cct->_conf->filestore_fd_cache_size / registry_shards);
+      registry[i].set_size(
+          MAX((cct->_conf->filestore_fd_cache_size / registry_shards), 1));
     }
   }
   ~FDCache() {
@@ -98,7 +100,8 @@ public:
 			  const std::set<std::string> &changed) {
     if (changed.count("filestore_fd_cache_size")) {
       for (int i = 0; i < registry_shards; ++i)
-        registry[i].set_size(conf->filestore_fd_cache_size / registry_shards);
+        registry[i].set_size(
+              MAX((conf->filestore_fd_cache_size / registry_shards), 1));
     }
   }
 

@@ -65,10 +65,6 @@ IndexManager::~IndexManager() {
 
   for(map<coll_t, CollectionIndex* > ::iterator it = col_indices.begin(); 
                                 it != col_indices.end(); it++) {
-    if(it->second) {
-      delete it->second;
-      it->second = NULL;
-    }
   }
   col_indices.clear();
 }
