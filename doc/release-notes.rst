@@ -20,9 +20,10 @@ Upgrading
   affects developers and testers only.
 
 * mon-specific and osd-specific leveldb options have been removed.
-  From this point onward users should use 'leveldb_' generic options and add
-  the options in the appropriate sections of their configuration files.
-  Monitors will still maintain the following monitor-specific defaults:
+  From this point onward users should use the `leveldb_*' generic
+  options and add the options in the appropriate sections of their
+  configuration files.  Monitors will still maintain the following
+  monitor-specific defaults:
 
     leveldb_write_buffer_size = 32*1024*1024  = 33554432  // 32MB
     leveldb_cache_size        = 512*1024*1204 = 536870912 // 512MB
@@ -465,6 +466,11 @@ Upgrading from v0.79
   always has.  This includes the C++ interface equivalents and AIO return
   values for the aio variants.
 
+* The radosgw init script (sysvinit) how requires that the 'host = ...' line in
+  ceph.conf, if present, match the short hostname (the output of 'hostname -s'),
+  not the fully qualified hostname or the (occasionally non-short) output of
+  'hostname'.  Failure to adjust this when upgrading from emperor or dumpling
+  may prevent the radosgw daemon from starting.
 
 Upgrading from v0.72 Emperor
 ----------------------------
@@ -1487,6 +1493,12 @@ Upgrading
 - The 'osd dump' command now dumps pool snaps as an array instead of an
   object.
 
+- The radosgw init script (sysvinit) how requires that the 'host = ...' line in
+  ceph.conf, if present, match the short hostname (the output of 'hostname -s'),
+  not the fully qualified hostname or the (occasionally non-short) output of
+  'hostname'.  Failure to adjust this when upgrading from emperor or dumpling
+  may prevent the radosgw daemon from starting.
+
 
 Notable Changes
 ---------------
@@ -2162,6 +2174,51 @@ Notable Changes
 * sysvinit: add condrestart command (Dan van der Ster)
 
 
+v0.67.10 "Dumpling"
+===================
+
+This stable update release for Dumpling includes primarily fixes for
+RGW, including several issues with bucket listings and a potential
+data corruption problem when multiple multi-part uploads race.  There is also
+some throttling capability added in the OSD for scrub that can mitigate the
+performance impact on production clusters.
+
+We recommend that all Dumpling users upgrade at their convenience.
+
+Notable Changes
+---------------
+
+* ceph-disk: partprobe befoere settle, fixing dm-crypt (#6966, Eric Eastman)
+* librbd: add invalidate cache interface (Josh Durgin)
+* librbd: close image if remove_child fails (Ilya Dryomov)
+* librbd: fix potential null pointer dereference (Danny Al-Gaaf)
+* librbd: improve writeback checks, performance (Haomai Wang)
+* librbd: skip zeroes when copying image (#6257, Josh Durgin)
+* mon: fix rule(set) check on 'ceph pool set ... crush_ruleset ...' (#8599, John Spray)
+* mon: shut down if mon is removed from cluster (#6789, Joao Eduardo Luis)
+* osd: fix filestore perf reports to mon (Sage Weil)
+* osd: force any new or updated xattr into leveldb if E2BIG from XFS (#7779, Sage Weil)
+* osd: lock snapdir object during write to fix race with backfill (Samuel Just)
+* osd: option sleep during scrub (Sage Weil)
+* osd: set io priority on scrub and snap trim threads (Sage Weil)
+* osd: 'status' admin socket command (Sage Weil)
+* rbd: tolerate missing NULL terminator on block_name_prefix (#7577, Dan Mick)
+* rgw: calculate user manifest (#8169, Yehuda Sadeh)
+* rgw: fix abort on chunk read error, avoid using extra memory (#8289, Yehuda Sadeh)
+* rgw: fix buffer overflow on bucket instance id (#8608, Yehuda Sadeh)
+* rgw: fix crash in swift CORS preflight request (#8586, Yehuda Sadeh)
+* rgw: fix implicit removal of old objects on object creation (#8972, Patrycja Szablowska, Yehuda Sadeh)
+* rgw: fix MaxKeys in bucket listing (Yehuda Sadeh)
+* rgw: fix race with multiple updates to a single multipart object (#8269, Yehuda Sadeh)
+* rgw: improve bucket listing with delimiter (Yehuda Sadeh)
+* rgw: include NextMarker in bucket listing (#8858, Yehuda Sadeh)
+* rgw: return error early on non-existent bucket (#7064, Yehuda Sadeh)
+* rgw: set truncation flag correctly in bucket listing (Yehuda Sadeh)
+* sysvinit: continue starting daemons after pre-mount error (#8554, Sage Weil)
+
+For more detailed information, see :download:`the complete changelog <changelog/v0.67.10.txt>`.
+
+
 v0.67.9 "Dumpling"
 ==================
 
@@ -2169,7 +2226,7 @@ This Dumpling point release fixes several minor bugs. The most
 prevalent in the field is one that occasionally prevents OSDs from
 starting on recently created clusters.
 
-We recommand that all Dumpling users upgrade at their convenience.
+We recommend that all Dumpling users upgrade at their convenience.
 
 Notable Changes
 ---------------

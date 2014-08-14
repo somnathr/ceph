@@ -876,6 +876,19 @@ struct pg_pool_t {
   const char *get_cache_mode_name() const {
     return get_cache_mode_name(cache_mode);
   }
+  bool cache_mode_requires_hit_set() const {
+    switch (cache_mode) {
+    case CACHEMODE_NONE:
+    case CACHEMODE_FORWARD:
+    case CACHEMODE_READONLY:
+      return false;
+    case CACHEMODE_WRITEBACK:
+    case CACHEMODE_READFORWARD:
+      return true;
+    default:
+      assert(0 == "implement me");
+    }
+  }
 
   uint64_t flags;           ///< FLAG_*
   __u8 type;                ///< TYPE_*
@@ -960,6 +973,7 @@ public:
   HitSet::Params hit_set_params; ///< The HitSet params to use on this pool
   uint32_t hit_set_period;      ///< periodicity of HitSet segments (seconds)
   uint32_t hit_set_count;       ///< number of periods to retain
+  uint32_t min_read_recency_for_promote;   ///< minimum number of HitSet to check before promote
 
   uint32_t stripe_width;        ///< erasure coded stripe size in bytes
 
@@ -984,6 +998,7 @@ public:
       hit_set_params(),
       hit_set_period(0),
       hit_set_count(0),
+      min_read_recency_for_promote(0),
       stripe_width(0)
   { }
 
@@ -1859,7 +1874,7 @@ inline ostream& operator<<(ostream& out, const pg_query_t& q) {
 class PGBackend;
 class ObjectModDesc {
   bool can_local_rollback;
-  bool stashed;
+  bool rollback_info_completed;
 public:
   class Visitor {
   public:
@@ -1879,22 +1894,22 @@ public:
     CREATE = 4,
     UPDATE_SNAPS = 5
   };
-  ObjectModDesc() : can_local_rollback(true), stashed(false) {}
+  ObjectModDesc() : can_local_rollback(true), rollback_info_completed(false) {}
   void claim(ObjectModDesc &other) {
     bl.clear();
     bl.claim(other.bl);
     can_local_rollback = other.can_local_rollback;
-    stashed = other.stashed;
+    rollback_info_completed = other.rollback_info_completed;
   }
   void claim_append(ObjectModDesc &other) {
-    if (!can_local_rollback || stashed)
+    if (!can_local_rollback || rollback_info_completed)
       return;
     if (!other.can_local_rollback) {
       mark_unrollbackable();
       return;
     }
     bl.claim_append(other.bl);
-    stashed = other.stashed;
+    rollback_info_completed = other.rollback_info_completed;
   }
   void swap(ObjectModDesc &other) {
     bl.swap(other.bl);
@@ -1903,16 +1918,16 @@ public:
     other.can_local_rollback = can_local_rollback;
     can_local_rollback = temp;
 
-    temp = other.stashed;
-    other.stashed = stashed;
-    stashed = temp;
+    temp = other.rollback_info_completed;
+    other.rollback_info_completed = rollback_info_completed;
+    rollback_info_completed = temp;
   }
   void append_id(ModID id) {
     uint8_t _id(id);
     ::encode(_id, bl);
   }
   void append(uint64_t old_size) {
-    if (!can_local_rollback || stashed)
+    if (!can_local_rollback || rollback_info_completed)
       return;
     ENCODE_START(1, 1, bl);
     append_id(APPEND);
@@ -1920,7 +1935,7 @@ public:
     ENCODE_FINISH(bl);
   }
   void setattrs(map<string, boost::optional<bufferlist> > &old_attrs) {
-    if (!can_local_rollback || stashed)
+    if (!can_local_rollback || rollback_info_completed)
       return;
     ENCODE_START(1, 1, bl);
     append_id(SETATTRS);
@@ -1928,24 +1943,25 @@ public:
     ENCODE_FINISH(bl);
   }
   bool rmobject(version_t deletion_version) {
-    if (!can_local_rollback || stashed)
+    if (!can_local_rollback || rollback_info_completed)
       return false;
     ENCODE_START(1, 1, bl);
     append_id(DELETE);
     ::encode(deletion_version, bl);
     ENCODE_FINISH(bl);
-    stashed = true;
+    rollback_info_completed = true;
     return true;
   }
   void create() {
-    if (!can_local_rollback || stashed)
+    if (!can_local_rollback || rollback_info_completed)
       return;
+    rollback_info_completed = true;
     ENCODE_START(1, 1, bl);
     append_id(CREATE);
     ENCODE_FINISH(bl);
   }
   void update_snaps(set<snapid_t> &old_snaps) {
-    if (!can_local_rollback || stashed)
+    if (!can_local_rollback || rollback_info_completed)
       return;
     ENCODE_START(1, 1, bl);
     append_id(UPDATE_SNAPS);
@@ -2600,6 +2616,7 @@ struct object_info_t {
 
   uint64_t size;
   utime_t mtime;
+  utime_t local_mtime; // local mtime
 
   // note: these are currently encoded into a total 16 bits; see
   // encode()/decode() for the weirdness.

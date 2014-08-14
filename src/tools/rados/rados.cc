@@ -195,7 +195,7 @@ static int dump_data(std::string const &filename, bufferlist const &data)
 {
   int fd;
   if (filename == "-") {
-    fd = 1;
+    fd = STDOUT_FILENO;
   } else {
     fd = TEMP_FAILURE_RETRY(::open(filename.c_str(), O_WRONLY|O_CREAT|O_TRUNC, 0644));
     if (fd < 0) {
@@ -221,7 +221,7 @@ static int do_get(IoCtx& io_ctx, const char *objname, const char *outfile, unsig
 
   int fd;
   if (strcmp(outfile, "-") == 0) {
-    fd = 1;
+    fd = STDOUT_FILENO;
   } else {
     fd = TEMP_FAILURE_RETRY(::open(outfile, O_WRONLY|O_CREAT|O_TRUNC, 0644));
     if (fd < 0) {
@@ -411,7 +411,7 @@ static int do_put(IoCtx& io_ctx, const char *objname, const char *infile, int op
     stdio = true;
 
   int ret;
-  int fd = 0;
+  int fd = STDIN_FILENO;
   if (!stdio)
     fd = open(infile, O_RDONLY);
   if (fd < 0) {
@@ -1486,10 +1486,10 @@ static int rados_tool_common(const std::map < std::string, std::string > &opts,
           formatter->dump_format("num_objects_missing_on_primary", "%lld", s.num_objects_missing_on_primary);
           formatter->dump_format("num_objects_unfound", "%lld", s.num_objects_unfound);
           formatter->dump_format("num_objects_degraded", "%lld", s.num_objects_degraded);
-          formatter->dump_format("read_bytes", "%lld", s.num_rd);
-          formatter->dump_format("read_kb", "%lld", s.num_rd_kb);
-          formatter->dump_format("write_bytes", "%lld", s.num_wr);
-          formatter->dump_format("write_kb", "%lld", s.num_wr_kb);
+          formatter->dump_format("read_ops", "%lld", s.num_rd);
+          formatter->dump_format("read_bytes", "%lld", s.num_rd_kb * 1024ull);
+          formatter->dump_format("write_ops", "%lld", s.num_wr);
+          formatter->dump_format("write_bytes", "%lld", s.num_wr_kb * 1024ull);
           formatter->flush(cout);
         }
         if (formatter) {
@@ -1641,15 +1641,22 @@ static int rados_tool_common(const std::map < std::string, std::string > &opts,
     }
   }
   else if (strcmp(nargs[0], "setxattr") == 0) {
-    if (!pool_name || nargs.size() < 4)
+    if (!pool_name || nargs.size() < 3 || nargs.size() > 4)
       usage_exit();
 
     string oid(nargs[1]);
     string attr_name(nargs[2]);
-    string attr_val(nargs[3]);
-
     bufferlist bl;
-    bl.append(attr_val.c_str(), attr_val.length());
+    if (nargs.size() == 4) {
+      string attr_val(nargs[3]);
+      bl.append(attr_val.c_str(), attr_val.length());
+    } else {
+      do {
+	ret = bl.read_fd(STDIN_FILENO, 1024); // from stdin
+	if (ret < 0)
+	  goto out;
+      } while (ret > 0);
+    }
 
     ret = io_ctx.setxattr(oid, attr_name.c_str(), bl);
     if (ret < 0) {
@@ -1675,7 +1682,7 @@ static int rados_tool_common(const std::map < std::string, std::string > &opts,
     else
       ret = 0;
     string s(bl.c_str(), bl.length());
-    cout << s << std::endl;
+    cout << s;
   } else if (strcmp(nargs[0], "rmxattr") == 0) {
     if (!pool_name || nargs.size() < 3)
       usage_exit();

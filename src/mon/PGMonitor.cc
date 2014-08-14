@@ -87,9 +87,11 @@ void PGMonitor::update_logger()
 {
   dout(10) << "update_logger" << dendl;
 
-  mon->cluster_logger->set(l_cluster_osd_kb, pg_map.osd_sum.kb);
-  mon->cluster_logger->set(l_cluster_osd_kb_used, pg_map.osd_sum.kb_used);
-  mon->cluster_logger->set(l_cluster_osd_kb_avail, pg_map.osd_sum.kb_avail);
+  mon->cluster_logger->set(l_cluster_osd_bytes, pg_map.osd_sum.kb * 1024ull);
+  mon->cluster_logger->set(l_cluster_osd_bytes_used,
+			   pg_map.osd_sum.kb_used * 1024ull);
+  mon->cluster_logger->set(l_cluster_osd_bytes_avail,
+			   pg_map.osd_sum.kb_avail * 1024ull);
 
   mon->cluster_logger->set(l_cluster_num_pool, pg_map.pg_pool_sum.size());
   mon->cluster_logger->set(l_cluster_num_pg, pg_map.pg_stat.size());
@@ -1168,7 +1170,7 @@ void PGMonitor::send_pg_creates(int osd, Connection *con)
   }
 
   if (con) {
-    mon->messenger->send_message(m, con);
+    con->send_message(m);
   } else {
     assert(mon->osdmon()->osdmap.is_up(osd));
     mon->messenger->send_message(m, mon->osdmon()->osdmap.get_inst(osd));
@@ -1231,9 +1233,9 @@ void PGMonitor::dump_object_stat_sum(TextTable &tbl, Formatter *f,
     if (verbose) {
       f->dump_int("dirty", sum.num_objects_dirty);
       f->dump_int("rd", sum.num_rd);
-      f->dump_int("rd_kb", sum.num_rd_kb);
+      f->dump_int("rd_bytes", sum.num_rd_kb * 1024ull);
       f->dump_int("wr", sum.num_wr);
-      f->dump_int("wr_kb", sum.num_wr_kb);
+      f->dump_int("wr_bytes", sum.num_wr_kb * 1024ull);
     }
   } else {
     tbl << stringify(si_t(sum.num_bytes));
@@ -1284,7 +1286,7 @@ void PGMonitor::dump_pool_stats(stringstream &ss, Formatter *f, bool verbose)
     if (verbose)
       tbl.define_column("CATEGORY", TextTable::LEFT, TextTable::LEFT);
     tbl.define_column("USED", TextTable::LEFT, TextTable::RIGHT);
-    tbl.define_column("%%USED", TextTable::LEFT, TextTable::RIGHT);
+    tbl.define_column("%USED", TextTable::LEFT, TextTable::RIGHT);
     tbl.define_column("MAX AVAIL", TextTable::LEFT, TextTable::RIGHT);
     tbl.define_column("OBJECTS", TextTable::LEFT, TextTable::RIGHT);
     if (verbose) {
@@ -1391,9 +1393,9 @@ void PGMonitor::dump_fs_stats(stringstream &ss, Formatter *f, bool verbose)
 {
   if (f) {
     f->open_object_section("stats");
-    f->dump_int("total_space", pg_map.osd_sum.kb);
-    f->dump_int("total_used", pg_map.osd_sum.kb_used);
-    f->dump_int("total_avail", pg_map.osd_sum.kb_avail);
+    f->dump_int("total_bytes", pg_map.osd_sum.kb * 1024ull);
+    f->dump_int("total_used_bytes", pg_map.osd_sum.kb_used * 1024ull);
+    f->dump_int("total_avail_bytes", pg_map.osd_sum.kb_avail * 1024ull);
     if (verbose) {
       f->dump_int("total_objects", pg_map.pg_sum.stats.sum.num_objects);
     }
@@ -1403,7 +1405,7 @@ void PGMonitor::dump_fs_stats(stringstream &ss, Formatter *f, bool verbose)
     tbl.define_column("SIZE", TextTable::LEFT, TextTable::RIGHT);
     tbl.define_column("AVAIL", TextTable::LEFT, TextTable::RIGHT);
     tbl.define_column("RAW USED", TextTable::LEFT, TextTable::RIGHT);
-    tbl.define_column("%%RAW USED", TextTable::LEFT, TextTable::RIGHT);
+    tbl.define_column("%RAW USED", TextTable::LEFT, TextTable::RIGHT);
     if (verbose) {
       tbl.define_column("OBJECTS", TextTable::LEFT, TextTable::RIGHT);
     }

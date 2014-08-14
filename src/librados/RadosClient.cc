@@ -103,8 +103,10 @@ int64_t librados::RadosClient::lookup_pool(const char *name)
   lock.Lock();
 
   int r = wait_for_osdmap();
-  if (r < 0)
+  if (r < 0) {
+    lock.Unlock();
     return r;
+  }
   int64_t ret = osdmap.lookup_pg_pool_name(name);
   pool_cache_rwl.get_write();
   lock.Unlock();
@@ -544,13 +546,19 @@ bool librados::RadosClient::put() {
 int librados::RadosClient::pool_create(string& name, unsigned long long auid,
 				       __u8 crush_rule)
 {
-  int reply;
+  lock.Lock();
+
+  int r = wait_for_osdmap();
+  if (r < 0) {
+    lock.Unlock();
+    return r;
+  }
 
   Mutex mylock ("RadosClient::pool_create::mylock");
+  int reply;
   Cond cond;
   bool done;
   Context *onfinish = new C_SafeCond(&mylock, &cond, &done, &reply);
-  lock.Lock();
   reply = objecter->create_pool(name, onfinish, auid, crush_rule);
   lock.Unlock();
 
@@ -570,8 +578,13 @@ int librados::RadosClient::pool_create_async(string& name, PoolAsyncCompletionIm
 					     __u8 crush_rule)
 {
   Mutex::Locker l(lock);
+
+  int r = wait_for_osdmap();
+  if (r < 0)
+    return r;
+
   Context *onfinish = new C_PoolAsync_Safe(c);
-  int r = objecter->create_pool(name, onfinish, auid, crush_rule);
+  r = objecter->create_pool(name, onfinish, auid, crush_rule);
   if (r < 0) {
     delete onfinish;
   }
@@ -582,8 +595,10 @@ int librados::RadosClient::pool_delete(const char *name)
 {
   lock.Lock();
   int r = wait_for_osdmap();
-  if (r < 0)
+  if (r < 0) {
+    lock.Unlock();
     return r;
+  }
   int tmp_pool_id = osdmap.lookup_pg_pool_name(name);
   if (tmp_pool_id < 0) {
     lock.Unlock();

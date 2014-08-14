@@ -100,7 +100,7 @@ void LogClient::do_log(clog_type type, const std::string& s)
       assert(messenger->get_myname().is_mon());
       ldout(cct,10) << "send_log to self" << dendl;
       Message *log = _get_mon_log_message();
-      messenger->send_message(log, messenger->get_myinst());
+      messenger->get_loopback_connection()->send_message(log);
     }
   }
 }
@@ -125,6 +125,7 @@ bool LogClient::are_pending()
 
 Message *LogClient::_get_mon_log_message()
 {
+  assert(log_lock.is_locked());
    if (log_queue.empty())
      return NULL;
 
@@ -150,7 +151,7 @@ Message *LogClient::_get_mon_log_message()
   assert(num_unsent <= log_queue.size());
   std::deque<LogEntry>::iterator p = log_queue.begin();
   std::deque<LogEntry> o;
-  while (p->seq < last_log_sent) {
+  while (p->seq <= last_log_sent) {
     ++p;
     assert(p != log_queue.end());
   }

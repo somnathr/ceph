@@ -302,13 +302,13 @@ function test_mon_misc()
   grep CATEGORY $TMPFILE
   grep DIRTY $TMPFILE
   ceph df --format json > $TMPFILE
-  grep 'total_space' $TMPFILE
+  grep 'total_bytes' $TMPFILE
   grep -v 'dirty' $TMPFILE
   ceph df detail --format json > $TMPFILE
-  grep 'rd_kb' $TMPFILE
+  grep 'rd_bytes' $TMPFILE
   grep 'dirty' $TMPFILE
-  ceph df --format xml | grep '<total_space>'
-  ceph df detail --format xml | grep '<rd_kb>'
+  ceph df --format xml | grep '<total_bytes>'
+  ceph df detail --format xml | grep '<rd_bytes>'
 
   ceph fsid
   ceph health
@@ -569,6 +569,7 @@ function test_mon_osd()
 
   id=`ceph osd create`
   ceph osd lost $id --yes-i-really-mean-it
+  expect_false ceph osd setmaxosd $id
   ceph osd rm $id
 
   uuid=`uuidgen`

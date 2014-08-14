@@ -635,7 +635,7 @@ void OSDMonitor::share_map_with_random_osd()
   dout(10) << "committed, telling random " << s->inst << " all about it" << dendl;
   // whatev, they'll request more if they need it
   MOSDMap *m = build_incremental(osdmap.get_epoch() - 1, osdmap.get_epoch());
-  mon->messenger->send_message(m, s->inst);
+  s->con->send_message(m);
 }
 
 version_t OSDMonitor::get_trim_to()
@@ -929,8 +929,13 @@ bool OSDMonitor::can_mark_down(int i)
     dout(5) << "can_mark_down NODOWN flag set, will not mark osd." << i << " down" << dendl;
     return false;
   }
+  int num_osds = osdmap.get_num_osds();
+  if (num_osds == 0) {
+    dout(5) << "can_mark_down no osds" << dendl;
+    return false;
+  }
   int up = osdmap.get_num_up_osds() - pending_inc.get_net_marked_down(&osdmap);
-  float up_ratio = (float)up / (float)osdmap.get_num_osds();
+  float up_ratio = (float)up / (float)num_osds;
   if (up_ratio < g_conf->mon_osd_min_up_ratio) {
     dout(5) << "can_mark_down current up_ratio " << up_ratio << " < min "
 	    << g_conf->mon_osd_min_up_ratio
@@ -959,8 +964,13 @@ bool OSDMonitor::can_mark_out(int i)
     dout(5) << "can_mark_out NOOUT flag set, will not mark osds out" << dendl;
     return false;
   }
+  int num_osds = osdmap.get_num_osds();
+  if (num_osds == 0) {
+    dout(5) << "can_mark_out no osds" << dendl;
+    return false;
+  }
   int in = osdmap.get_num_in_osds() - pending_inc.get_net_marked_out(&osdmap);
-  float in_ratio = (float)in / (float)osdmap.get_num_osds();
+  float in_ratio = (float)in / (float)num_osds;
   if (in_ratio < g_conf->mon_osd_min_in_ratio) {
     if (i >= 0)
       dout(5) << "can_mark_down current in_ratio " << in_ratio << " < min "
@@ -1800,8 +1810,7 @@ void OSDMonitor::check_sub(Subscription *sub)
     if (sub->next >= 1)
       send_incremental(sub->next, sub->session->inst, sub->incremental_onetime);
     else
-      mon->messenger->send_message(build_latest_full(),
-				   sub->session->inst);
+      sub->session->con->send_message(build_latest_full());
     if (sub->onetime)
       mon->session_map.remove_sub(sub);
     else
@@ -2075,6 +2084,32 @@ void OSDMonitor::get_health(list<pair<health_status_t,string> >& summary,
 	  ss << "; see http://ceph.com/docs/master/rados/operations/crush-map/#tunables";
 	  detail->push_back(make_pair(HEALTH_WARN, ss.str()));
 	}
+      }
+    }
+
+    // hit_set-less cache_mode?
+    if (g_conf->mon_warn_on_cache_pools_without_hit_sets) {
+      int problem_cache_pools = 0;
+      for (map<int64_t, pg_pool_t>::const_iterator p = osdmap.pools.begin();
+	   p != osdmap.pools.end();
+	   ++p) {
+	const pg_pool_t& info = p->second;
+	if (info.cache_mode_requires_hit_set() &&
+	    info.hit_set_params.get_type() == HitSet::TYPE_NONE) {
+	  ++problem_cache_pools;
+	  if (detail) {
+	    ostringstream ss;
+	    ss << "pool '" << osdmap.get_pool_name(p->first)
+	       << "' with cache_mode " << info.get_cache_mode_name()
+	       << " needs hit_set_type to be set but it is not";
+	    detail->push_back(make_pair(HEALTH_WARN, ss.str()));
+	  }
+	}
+      }
+      if (problem_cache_pools) {
+	ostringstream ss;
+	ss << problem_cache_pools << " cache pools are missing hit_sets";
+	summary.push_back(make_pair(HEALTH_WARN, ss.str()));
       }
     }
 
@@ -2545,6 +2580,8 @@ bool OSDMonitor::preprocess_command(MMonCommand *m)
         f->dump_unsigned("cache_min_evict_age", p->cache_min_evict_age);
       } else if (var == "erasure_code_profile") {
        f->dump_string("erasure_code_profile", p->erasure_code_profile);
+      } else if (var == "min_read_recency_for_promote") {
+	f->dump_int("min_read_recency_for_promote", p->min_read_recency_for_promote);
       }
 
       f->close_section();
@@ -2594,6 +2631,8 @@ bool OSDMonitor::preprocess_command(MMonCommand *m)
         ss << "cache_min_evict_age: " << p->cache_min_evict_age;
       } else if (var == "erasure_code_profile") {
        ss << "erasure_code_profile: " << p->erasure_code_profile;
+      } else if (var == "min_read_recency_for_promote") {
+	ss << "min_read_recency_for_promote: " << p->min_read_recency_for_promote;
       }
 
       rdata.append(ss);
@@ -2768,13 +2807,13 @@ stats_out:
       osdmap.crush->dump_rules(f.get());
       f->close_section();
     } else {
-      int ruleset = osdmap.crush->get_rule_id(name);
-      if (ruleset < 0) {
+      int ruleno = osdmap.crush->get_rule_id(name);
+      if (ruleno < 0) {
 	ss << "unknown crush ruleset '" << name << "'";
-	r = ruleset;
+	r = ruleno;
 	goto reply;
       }
-      osdmap.crush->dump_rule(ruleset, f.get());
+      osdmap.crush->dump_rule(ruleno, f.get());
     }
     ostringstream rs;
     f->flush(rs);
@@ -3038,15 +3077,18 @@ int OSDMonitor::crush_ruleset_create_erasure(const string &name,
 					     int *ruleset,
 					     stringstream &ss)
 {
-  *ruleset = osdmap.crush->get_rule_id(name);
-  if (*ruleset != -ENOENT)
+  int ruleid = osdmap.crush->get_rule_id(name);
+  if (ruleid != -ENOENT) {
+    *ruleset = osdmap.crush->get_rule_mask_ruleset(ruleid);
     return -EEXIST;
+  }
 
   CrushWrapper newcrush;
   _get_pending_crush(newcrush);
 
-  *ruleset = newcrush.get_rule_id(name);
-  if (*ruleset != -ENOENT) {
+  ruleid = newcrush.get_rule_id(name);
+  if (ruleid != -ENOENT) {
+    *ruleset = newcrush.get_rule_mask_ruleset(ruleid);
     return -EALREADY;
   } else {
     ErasureCodeInterfaceRef erasure_code;
@@ -3481,6 +3523,7 @@ int OSDMonitor::prepare_command_pool_set(map<string,cmd_vartype> &cmdmap,
   string interr, floaterr;
   int64_t n = 0;
   double f = 0;
+  int64_t uf = 0;  // micro-f
   if (!cmd_getval(g_ceph_context, cmdmap, "val", val)) {
     // wasn't a string; maybe an older mon forwarded json with an int?
     if (!cmd_getval(g_ceph_context, cmdmap, "val", n))
@@ -3490,6 +3533,7 @@ int OSDMonitor::prepare_command_pool_set(map<string,cmd_vartype> &cmdmap,
     n = strict_strtoll(val.c_str(), 10, &interr);
     // or a float
     f = strict_strtod(val.c_str(), &floaterr);
+    uf = llrintl(f * (double)1000000.0);
   }
 
   if (!p.is_tier() &&
@@ -3554,7 +3598,7 @@ int OSDMonitor::prepare_command_pool_set(map<string,cmd_vartype> &cmdmap,
       ss << "splits in cache pools must be followed by scrubs and leave sufficient free space to avoid overfilling.  use --yes-i-really-mean-it to force.";
       return -EPERM;
     }
-    int expected_osds = MIN(p.get_pg_num(), osdmap.get_num_osds());
+    int expected_osds = MAX(1, MIN(p.get_pg_num(), osdmap.get_num_osds()));
     int64_t new_pgs = n - p.get_pg_num();
     int64_t pgs_per_osd = new_pgs / expected_osds;
     if (pgs_per_osd > g_conf->mon_osd_max_split_count) {
@@ -3684,7 +3728,7 @@ int OSDMonitor::prepare_command_pool_set(map<string,cmd_vartype> &cmdmap,
       ss << "value must be in the range 0..1";
       return -ERANGE;
     }
-    p.cache_target_dirty_ratio_micro = f * 1000000;
+    p.cache_target_dirty_ratio_micro = uf;
   } else if (var == "cache_target_full_ratio") {
     if (floaterr.length()) {
       ss << "error parsing float '" << val << "': " << floaterr;
@@ -3694,7 +3738,7 @@ int OSDMonitor::prepare_command_pool_set(map<string,cmd_vartype> &cmdmap,
       ss << "value must be in the range 0..1";
       return -ERANGE;
     }
-    p.cache_target_full_ratio_micro = f * 1000000;
+    p.cache_target_full_ratio_micro = uf;
   } else if (var == "cache_min_flush_age") {
     if (interr.length()) {
       ss << "error parsing int '" << val << "': " << interr;
@@ -3707,6 +3751,12 @@ int OSDMonitor::prepare_command_pool_set(map<string,cmd_vartype> &cmdmap,
       return -EINVAL;
     }
     p.cache_min_evict_age = n;
+  } else if (var == "min_read_recency_for_promote") {
+    if (interr.length()) {
+      ss << "error parsing integer value '" << val << "': " << interr;
+      return -EINVAL;
+    }
+    p.min_read_recency_for_promote = n;
   } else {
     ss << "unrecognized variable '" << var << "'";
     return -EINVAL;
@@ -4252,7 +4302,9 @@ bool OSDMonitor::prepare_command_impl(MMonCommand *m,
       mode = "firstn";
 
     if (osdmap.crush->rule_exists(name)) {
-      ss << "rule " << name << " already exists";
+      // The name is uniquely associated to a ruleid and the ruleset it contains
+      // From the user point of view, the ruleset is more meaningfull.
+      ss << "ruleset " << name << " already exists";
       err = 0;
       goto reply;
     }
@@ -4261,13 +4313,15 @@ bool OSDMonitor::prepare_command_impl(MMonCommand *m,
     _get_pending_crush(newcrush);
 
     if (newcrush.rule_exists(name)) {
-      ss << "rule " << name << " already exists";
+      // The name is uniquely associated to a ruleid and the ruleset it contains
+      // From the user point of view, the ruleset is more meaningfull.
+      ss << "ruleset " << name << " already exists";
       err = 0;
     } else {
-      int rule = newcrush.add_simple_ruleset(name, root, type, mode,
-					     pg_pool_t::TYPE_REPLICATED, &ss);
-      if (rule < 0) {
-	err = rule;
+      int ruleno = newcrush.add_simple_ruleset(name, root, type, mode,
+					       pg_pool_t::TYPE_REPLICATED, &ss);
+      if (ruleno < 0) {
+	err = ruleno;
 	goto reply;
       }
 
@@ -4364,6 +4418,24 @@ bool OSDMonitor::prepare_command_impl(MMonCommand *m,
     cmd_getval(g_ceph_context, cmdmap, "profile", profile);
     if (profile == "")
       profile = "default";
+    if (profile == "default") {
+      if (!osdmap.has_erasure_code_profile(profile)) {
+	if (pending_inc.has_erasure_code_profile(profile)) {
+	  dout(20) << "erasure code profile " << profile << " already pending" << dendl;
+	  goto wait;
+	}
+
+	map<string,string> profile_map;
+	err = osdmap.get_erasure_code_profile_default(g_ceph_context,
+						      profile_map,
+						      &ss);
+	if (err)
+	  goto reply;
+	dout(20) << "erasure code profile " << profile << " set" << dendl;
+	pending_inc.set_erasure_code_profile(profile, profile_map);
+	goto wait;
+      }
+    }
 
     int ruleset;
     err = crush_ruleset_create_erasure(name, profile, &ruleset, ss);
@@ -4416,7 +4488,7 @@ bool OSDMonitor::prepare_command_impl(MMonCommand *m,
       // complexity now.
       int ruleset = newcrush.get_rule_mask_ruleset(ruleno);
       if (osdmap.crush_ruleset_in_use(ruleset)) {
-	ss << "crush rule " << name << " ruleset " << ruleset << " is in use";
+	ss << "crush ruleset " << name << " " << ruleset << " is in use";
 	err = -EBUSY;
 	goto reply;
       }
@@ -4448,6 +4520,23 @@ bool OSDMonitor::prepare_command_impl(MMonCommand *m,
       ss << "cannot set max_osd to " << newmax << " which is > conf.mon_max_osd ("
 	 << g_conf->mon_max_osd << ")";
       goto reply;
+    }
+
+    // Don't allow shrinking OSD number as this will cause data loss
+    // and may cause kernel crashes.
+    // Note: setmaxosd sets the maximum OSD number and not the number of OSDs
+    if (newmax < osdmap.get_max_osd()) {
+      // Check if the OSDs exist between current max and new value.
+      // If there are any OSDs exist, then don't allow shrinking number
+      // of OSDs.
+      for (int i = newmax; i <= osdmap.get_max_osd(); i++) {
+        if (osdmap.exists(i)) {
+          err = -EBUSY;
+          ss << "cannot shrink max_osd to " << newmax
+             << " because osd." << i << " (and possibly others) still in use";
+          goto reply;
+        }
+      }
     }
 
     pending_inc.new_max_osd = newmax;
@@ -5039,6 +5128,25 @@ done:
     cmd_getval(g_ceph_context, cmdmap, "erasure_code_profile", erasure_code_profile);
     if (erasure_code_profile == "")
       erasure_code_profile = "default";
+    if (erasure_code_profile == "default") {
+      if (!osdmap.has_erasure_code_profile(erasure_code_profile)) {
+	if (pending_inc.has_erasure_code_profile(erasure_code_profile)) {
+	  dout(20) << "erasure code profile " << erasure_code_profile << " already pending" << dendl;
+	  goto wait;
+	}
+
+	map<string,string> profile_map;
+	err = osdmap.get_erasure_code_profile_default(g_ceph_context,
+						      profile_map,
+						      &ss);
+	if (err)
+	  goto reply;
+	dout(20) << "erasure code profile " << erasure_code_profile << " set" << dendl;
+	pending_inc.set_erasure_code_profile(erasure_code_profile, profile_map);
+	goto wait;
+      }
+    }
+
     if (ruleset_name == "") {
       if (erasure_code_profile == "default") {
 	ruleset_name = "erasure-code";
@@ -5541,6 +5649,7 @@ done:
     ntp->cache_mode = mode;
     ntp->hit_set_count = g_conf->osd_tier_default_cache_hit_set_count;
     ntp->hit_set_period = g_conf->osd_tier_default_cache_hit_set_period;
+    ntp->min_read_recency_for_promote = g_conf->osd_tier_default_cache_min_read_recency_for_promote;
     ntp->hit_set_params = hsp;
     ntp->target_max_bytes = size;
     ss << "pool '" << tierpoolstr << "' is now (or already was) a cache tier of '" << poolstr << "'";
